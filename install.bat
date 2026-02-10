@@ -7,7 +7,7 @@ echo ============================================
 echo.
 
 :: Check for Python
-echo [1/4] Checking Python installation...
+echo [1/5] Checking Python installation...
 where python >nul 2>&1
 if %errorlevel% neq 0 (
     echo ERROR: Python not found!
@@ -22,7 +22,7 @@ echo   Found Python %PYVER%
 
 :: Install dependencies
 echo.
-echo [2/4] Installing dependencies...
+echo [2/5] Installing dependencies...
 python -m pip install --upgrade pip >nul 2>&1
 python -m pip install -r "%~dp0requirements.txt"
 if %errorlevel% neq 0 (
@@ -32,9 +32,19 @@ if %errorlevel% neq 0 (
 )
 echo   Dependencies installed successfully.
 
+:: Verify FFmpeg
+echo.
+echo [3/5] Checking bundled FFmpeg...
+if exist "%~dp0ffmpeg\ffmpeg.exe" (
+    echo   Found FFmpeg at %~dp0ffmpeg\ffmpeg.exe
+) else (
+    echo   WARNING: FFmpeg not found in ffmpeg\ folder.
+    echo   Layer comp auto-composition will not be available.
+)
+
 :: Verify Moho installation
 echo.
-echo [3/4] Checking Moho installation...
+echo [4/5] Checking Moho installation...
 if exist "C:\Program Files\Moho 14\Moho.exe" (
     echo   Found Moho 14 at C:\Program Files\Moho 14\Moho.exe
 ) else (
@@ -44,7 +54,7 @@ if exist "C:\Program Files\Moho 14\Moho.exe" (
 
 :: Register context menu
 echo.
-echo [4/4] Windows integration...
+echo [5/5] Windows integration...
 set /p REGISTER="Register right-click context menu for .moho files? (Y/N): "
 if /i "%REGISTER%"=="Y" (
     cd /d "%~dp0"

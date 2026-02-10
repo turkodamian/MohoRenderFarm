@@ -1,6 +1,7 @@
 """Core Moho CLI rendering engine wrapper."""
 import subprocess
 import os
+import shutil
 import time
 import threading
 import uuid
@@ -48,6 +49,9 @@ class RenderJob:
     videocodec: Optional[int] = None
     quality: Optional[int] = None
     depth: Optional[int] = None
+    subfolder_project: bool = False
+    copy_images: bool = False
+    compose_layers: bool = False
     # Runtime state
     status: str = RenderStatus.PENDING.value
     progress: float = 0.0
@@ -168,6 +172,10 @@ class MohoRenderer:
         job.start_time = time.time()
         job.error_message = ""
 
+        # Copy \Images to project root if requested
+        if job.copy_images:
+            _copy_images_to_root(job, on_output)
+
         cmd = self.build_command(job)
 
         # Ensure output directory exists
@@ -193,6 +201,11 @@ class MohoRenderer:
             on_output(f"[{job.id}] Starting render: {job.project_name}")
             on_output(f"[{job.id}] Command: {' '.join(cmd)}")
 
+        monitor = None
+        heartbeat = None
+        stdout_reader = None
+        stderr_reader = None
+
         try:
             self._process = subprocess.Popen(
                 cmd,
@@ -203,30 +216,55 @@ class MohoRenderer:
 
             # Monitor log file for progress if verbose
             if log_path:
-                monitor = LogMonitor(log_path, on_output, on_progress)
+                monitor = LogMonitor(log_path, on_output, on_progress, job_id=job.id)
                 monitor.start()
 
-            stdout, stderr = self._process.communicate()
+            # Read stdout/stderr line-by-line in threads for real-time output
+            stdout_reader = _StreamReader(self._process.stdout, on_output, on_progress, job_id=job.id)
+            stderr_reader = _StreamReader(self._process.stderr, None, None, job_id=job.id, is_stderr=True)
+            stdout_reader.start()
+            stderr_reader.start()
+
+            # Start heartbeat thread for periodic status updates
+            heartbeat = _HeartbeatThread(job, on_output, interval=10)
+            heartbeat.start()
+
+            # Wait for process to complete (non-blocking reads happening in threads)
+            self._process.wait()
             return_code = self._process.returncode
 
-            if log_path:
+            # Stop readers and collect stderr
+            stdout_reader.stop()
+            stderr_reader.stop()
+            stderr_text = stderr_reader.get_output()
+
+            # Stop heartbeat
+            heartbeat.stop()
+
+            # Final flush: read any remaining buffered log content
+            if log_path and monitor:
+                monitor.final_flush()
                 monitor.stop()
+
+            # Format elapsed time
+            elapsed = time.time() - job.start_time
+            elapsed_str = _format_elapsed(elapsed)
 
             if self._cancelled:
                 job.status = RenderStatus.CANCELLED.value
                 if on_output:
-                    on_output(f"[{job.id}] Render cancelled")
+                    on_output(f"[{job.id}] Render cancelled ({elapsed_str})")
             elif return_code == 0:
                 job.status = RenderStatus.COMPLETED.value
                 job.progress = 100.0
                 if on_output:
-                    on_output(f"[{job.id}] Render completed successfully")
+                    on_output(f"[{job.id}] Render completed successfully ({elapsed_str})")
             else:
                 job.status = RenderStatus.FAILED.value
-                error = stderr.decode("utf-8", errors="replace").strip() if stderr else f"Exit code: {return_code}"
+                error = stderr_text.strip() if stderr_text else f"Exit code: {return_code}"
                 job.error_message = error
                 if on_output:
-                    on_output(f"[{job.id}] Render FAILED: {error}")
+                    on_output(f"[{job.id}] Render FAILED ({elapsed_str}): {error}")
 
         except FileNotFoundError:
             job.status = RenderStatus.FAILED.value
@@ -241,6 +279,14 @@ class MohoRenderer:
         finally:
             job.end_time = time.time()
             self._process = None
+            if heartbeat:
+                heartbeat.stop()
+            if stdout_reader:
+                stdout_reader.stop()
+            if stderr_reader:
+                stderr_reader.stop()
+            if monitor:
+                monitor.stop()
             if on_complete:
                 on_complete(job)
 
@@ -257,17 +303,147 @@ class MohoRenderer:
                 self._process.kill()
 
 
+def _format_elapsed(seconds):
+    """Format elapsed seconds into a human-readable string."""
+    mins, secs = divmod(int(seconds), 60)
+    hours, mins = divmod(mins, 60)
+    if hours:
+        return f"{hours}h {mins}m {secs}s"
+    if mins:
+        return f"{mins}m {secs}s"
+    return f"{secs}s"
+
+
+def _copy_images_to_root(job: RenderJob, on_output=None):
+    """Copy files from \\Images subfolder to the project root directory."""
+    project_dir = Path(job.project_file).parent
+    images_dir = project_dir / "Images"
+    if not images_dir.is_dir():
+        return
+    copied = 0
+    for src_file in images_dir.iterdir():
+        if src_file.is_file():
+            dest = project_dir / src_file.name
+            if not dest.exists():
+                shutil.copy2(str(src_file), str(dest))
+                copied += 1
+    if on_output and copied > 0:
+        on_output(f"[{job.id}] Copied {copied} file(s) from Images/ to project root")
+
+
+class _StreamReader:
+    """Reads a subprocess stream line-by-line in a background thread."""
+
+    def __init__(self, stream, on_output=None, on_progress=None,
+                 job_id="", is_stderr=False):
+        self._stream = stream
+        self._on_output = on_output
+        self._on_progress = on_progress
+        self._job_id = job_id
+        self._is_stderr = is_stderr
+        self._thread = None
+        self._output_lines = []
+        self._last_progress = -1.0
+
+    def start(self):
+        self._thread = threading.Thread(target=self._read, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        if self._thread:
+            self._thread.join(timeout=3)
+
+    def get_output(self):
+        return "\n".join(self._output_lines)
+
+    def _read(self):
+        try:
+            for raw_line in self._stream:
+                line = raw_line.decode("utf-8", errors="replace").rstrip()
+                if not line:
+                    continue
+                if self._is_stderr:
+                    self._output_lines.append(line)
+                    continue
+                # stdout: emit as log and parse progress
+                if self._on_output:
+                    self._on_output(f"[{self._job_id}] {line}")
+                self._parse_progress(line)
+        except (IOError, OSError, ValueError):
+            pass
+
+    def _parse_progress(self, line):
+        if self._on_progress is None:
+            return
+        line_stripped = line.strip()
+        if line_stripped.startswith("Frame "):
+            try:
+                paren_start = line_stripped.index("(")
+                paren_end = line_stripped.index(")")
+                fraction = line_stripped[paren_start + 1:paren_end]
+                parts = fraction.split("/")
+                if len(parts) == 2:
+                    current = int(parts[0])
+                    total = int(parts[1])
+                    if total > 0:
+                        progress = (current / total) * 100.0
+                        self._on_progress(progress)
+            except (ValueError, IndexError):
+                pass
+
+
+class _HeartbeatThread:
+    """Emits periodic status messages while a render is in progress."""
+
+    def __init__(self, job: RenderJob,
+                 on_output: Optional[Callable[[str], None]] = None,
+                 interval: float = 10):
+        self._job = job
+        self._on_output = on_output
+        self._interval = interval
+        self._running = False
+        self._thread = None
+
+    def start(self):
+        self._running = True
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=2)
+
+    def _run(self):
+        while self._running:
+            time.sleep(self._interval)
+            if not self._running:
+                break
+            elapsed = time.time() - (self._job.start_time or time.time())
+            elapsed_str = _format_elapsed(elapsed)
+            progress = self._job.progress
+            if self._on_output:
+                if progress > 0:
+                    self._on_output(f"[{self._job.id}] Rendering... {progress:.0f}% - Elapsed: {elapsed_str}")
+                else:
+                    self._on_output(f"[{self._job.id}] Rendering... Elapsed: {elapsed_str}")
+
+
 class LogMonitor:
     """Monitors a Moho log file for progress updates."""
 
     def __init__(self, log_path: str,
                  on_output: Optional[Callable[[str], None]] = None,
-                 on_progress: Optional[Callable[[float], None]] = None):
+                 on_progress: Optional[Callable[[float], None]] = None,
+                 job_id: str = ""):
         self.log_path = log_path
         self.on_output = on_output
         self.on_progress = on_progress
+        self._job_id = job_id
         self._running = False
         self._thread = None
+        self._last_size = 0
+        self._last_progress = -1.0
 
     def start(self):
         self._running = True
@@ -279,20 +455,36 @@ class LogMonitor:
         if self._thread:
             self._thread.join(timeout=2)
 
+    def final_flush(self):
+        """Read any remaining content from the log file after process ends."""
+        try:
+            if os.path.exists(self.log_path):
+                with open(self.log_path, "r", encoding="utf-8", errors="replace") as f:
+                    f.seek(self._last_size)
+                    new_content = f.read()
+                    if new_content:
+                        self._last_size = f.tell()
+                        for line in new_content.strip().split("\n"):
+                            if line.strip():
+                                if self.on_output:
+                                    self.on_output(f"[{self._job_id}] {line.strip()}")
+                                self._parse_progress(line)
+        except (IOError, OSError):
+            pass
+
     def _monitor(self):
-        last_size = 0
         while self._running:
             try:
                 if os.path.exists(self.log_path):
                     with open(self.log_path, "r", encoding="utf-8", errors="replace") as f:
-                        f.seek(last_size)
+                        f.seek(self._last_size)
                         new_content = f.read()
                         if new_content:
-                            last_size = f.tell()
+                            self._last_size = f.tell()
                             for line in new_content.strip().split("\n"):
                                 if line.strip():
                                     if self.on_output:
-                                        self.on_output(line.strip())
+                                        self.on_output(f"[{self._job_id}] {line.strip()}")
                                     self._parse_progress(line)
             except (IOError, OSError):
                 pass
@@ -302,8 +494,6 @@ class LogMonitor:
         """Try to extract progress from Moho log output.
         Moho outputs: 'Frame 1 (1/5)  X.XX secs/frame  Y.YY secs remaining'
         """
-        if self.on_progress is None:
-            return
         line_stripped = line.strip()
         # Match pattern: Frame N (current/total)
         if line_stripped.startswith("Frame "):
@@ -317,6 +507,15 @@ class LogMonitor:
                     current = int(parts[0])
                     total = int(parts[1])
                     if total > 0:
-                        self.on_progress((current / total) * 100.0)
+                        progress = (current / total) * 100.0
+                        if self.on_progress:
+                            self.on_progress(progress)
+                        # Emit progress as log message every ~10% change
+                        if progress - self._last_progress >= 10.0 or progress >= 100.0:
+                            self._last_progress = progress
+                            # Extract timing info from the rest of the line
+                            timing = line_stripped[paren_end + 1:].strip()
+                            if self.on_output and timing:
+                                self.on_output(f"[{self._job_id}] Progress: {progress:.0f}% - Frame {current}/{total} ({timing})")
             except (ValueError, IndexError):
                 pass

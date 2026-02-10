@@ -14,8 +14,15 @@ Created by **Damian Turkieh**
 - **CLI Automation** - Complete command-line interface for scripting and pipelines
 - **All Moho Render Options** - Format, codec, frame range, layer comps, antialiasing, multithreading, and more
 - **Queue Management** - Save/load queues, reorder, retry, duplicate jobs
+- **Render Settings Presets** - Save/load/delete render presets with default preset support
+- **Real-time Progress** - Live progress and elapsed time updates during rendering
+- **FFmpeg Layer Composition** - Auto-compose layer comp PNG sequences into MP4 after rendering
+- **Project Subfolder Output** - Automatically create subfolders named after each project
+- **Images Copy** - Copy `\Images` media to project root to fix offline media references
 - **Windows Integration** - Right-click context menu on .moho files to render or add to queue
 - **Drag & Drop** - Drag .moho files directly onto the application window
+- **Edit Queue Settings** - Modify render settings for one or multiple queued jobs simultaneously
+- **Show in Explorer** - Open project location directly from the queue context menu
 
 ---
 
@@ -75,16 +82,22 @@ The application has 4 main tabs:
 - **Stop** (F7) - Cancel current render and stop queue
 - **Save/Load Queue** - Persist your queue to a JSON file
 - **Drag & Drop** - Drag .moho files or folders directly onto the window
-- **Right-click** on a job for: Retry, Duplicate, Move Up/Down, Remove, Cancel
+- **Right-click** on a job for: Edit Render Settings, Show in Explorer, Retry, Duplicate, Move Up/Down, Remove, Cancel
+- **Real-time updates** - Progress percentage and elapsed time update every second during rendering
+- **Layer Comp column** - Shows which layer composition is assigned to each job
 
 ### Render Settings Tab
 Configure all Moho render options that apply to new jobs added to the queue:
+
+#### Render Presets
+Save and load your render settings as named presets. Set a default preset that loads automatically on startup.
 
 | Setting | Description | Default |
 |---------|-------------|---------|
 | Format | Output format (MP4, PNG, JPEG, TGA, BMP, PSD, QT, GIF) | MP4 |
 | Preset/Codec | Video codec preset (e.g., "MP4 (MPEG4-AAC)") | MP4 (MPEG4-AAC) |
 | Output Folder | Destination folder (empty = same as project) | Project folder |
+| Create Subfolder | Create a subfolder named after each project | No |
 | Frame Range | Custom start/end frames | Entire animation |
 | Multi-threaded | Use up to 5 render threads | Yes |
 | Half Size | Render at 50% resolution | No |
@@ -96,10 +109,12 @@ Configure all Moho render options that apply to new jobs added to the queue:
 | Extra-smooth | Extra image quality | No |
 | Premultiply Alpha | Premultiply alpha channel | Yes |
 | NTSC Safe Colors | Clamp to NTSC-safe range | No |
+| Copy Images | Copy `\Images` folder to project root (fix offline media) | No |
 | Layer Comp | Specific layer comp or AllComps/AllLayerComps | None |
 | Add Layer Comp Suffix | Append comp name to filename | No |
 | Create Folder for Layer Comp | Subfolder per comp | No |
 | Add Format Suffix | Append format name to filename | No |
+| Auto-compose Layers | Compose all layer comps into MP4 with ffmpeg | No |
 | Quality (QT only) | 0=Min, 1=Low, 2=Normal, 3=High, 4=Max, 5=Lossless | 3 (High) |
 | Pixel Depth (QT only) | 24 or 32 (for alpha channel) | 24 |
 
@@ -113,6 +128,24 @@ Set up distributed rendering across multiple PCs:
 ### App Settings Tab
 - **Moho.exe Path** - Configure the path to Moho.exe (default: `C:\Program Files\Moho 14\Moho.exe`)
 - **Windows Integration** - Register/unregister right-click context menu for .moho files
+
+---
+
+## FFmpeg Layer Composition
+
+When rendering with layer comps (e.g., `AllLayerComps`) and the **Auto-compose** option enabled, the app will automatically composite all rendered layers into a single MP4 after rendering completes.
+
+### How it works
+
+1. Each layer comp is rendered as a separate PNG sequence in its own subfolder
+2. After rendering, ffmpeg overlays all layers using alpha compositing:
+   - **Last alphabetically** = background (bottom layer)
+   - **First alphabetically** = foreground (top layer)
+3. The composed result is saved as `{folder_name}_composed.mp4`
+
+### Requirements
+
+FFmpeg is bundled in the `ffmpeg/` folder. No additional installation needed.
 
 ---
 
@@ -290,10 +323,15 @@ MohoRenderFarm/
 ├── start.bat               # Quick launcher
 ├── install.bat             # Installer
 ├── requirements.txt        # Python dependencies
+├── ffmpeg/                 # Bundled FFmpeg (Git LFS)
+│   ├── ffmpeg.exe          # FFmpeg encoder
+│   ├── ffprobe.exe         # FFmpeg probe
+│   └── *.dll               # FFmpeg libraries
 ├── src/
 │   ├── config.py           # App configuration
 │   ├── moho_renderer.py    # Moho CLI wrapper engine
 │   ├── render_queue.py     # Queue management
+│   ├── ffmpeg_compose.py   # FFmpeg layer comp compositor
 │   ├── gui/
 │   │   ├── main_window.py  # Main GUI window
 │   │   └── styles.py       # Dark theme styles
@@ -302,6 +340,7 @@ MohoRenderFarm/
 │   │   └── slave.py        # Render farm slave client
 │   └── utils/
 │       └── context_menu.py # Windows registry integration
+├── screenshots/            # GUI screenshots
 └── MohoProjects/           # Test projects (gitignored)
 ```
 
@@ -312,6 +351,7 @@ MohoRenderFarm/
 - **Python** 3.10 or higher
 - **Moho Pro 14** (or compatible version)
 - **Windows** (tested on Windows 10/11)
+- **FFmpeg** - Bundled in `ffmpeg/` folder (used for layer comp composition)
 - **Dependencies**: PyQt6, Flask, requests (installed via `install.bat` or `pip`)
 
 ---
@@ -322,10 +362,30 @@ Configuration is stored in `%APPDATA%\MohoRenderFarm\config.json` and includes:
 - Moho executable path
 - Default output directory
 - Default format and preset
+- Default render preset name
 - Network port settings
 - Recent projects and queues
 
 Saved queues are stored in `%APPDATA%\MohoRenderFarm\queues\`.
+Render presets are stored in `%APPDATA%\MohoRenderFarm\presets\`.
+
+---
+
+## Changelog
+
+### v1.1.0
+- **Render Settings Presets** - Save/load/delete render presets with default preset support
+- **Real-time Progress** - Live progress percentage and elapsed time updates in queue table during rendering
+- **Layer Comp Column** - New column in Render Queue showing assigned layer composition
+- **Project Subfolder** - Checkbox to auto-create output subfolder named after each project
+- **FFmpeg Layer Composition** - Auto-compose all layer comp PNG sequences into MP4 after rendering
+- **Copy Images** - Auto-copy `\Images` media to project root before rendering (fix offline media)
+- **Edit Render Settings** - Modify settings for one or multiple queued jobs via context menu
+- **Show in Explorer** - Open project file location from queue context menu
+- **Verbose Render Output** - Real-time log output with heartbeat status every 10 seconds
+
+### v1.0.0
+- Initial release with full GUI, CLI, render farm, and all Moho render options
 
 ---
 

@@ -191,6 +191,19 @@ class RenderQueue:
 
             self._current_job = None
 
+            # Post-render: auto-compose layer comps with ffmpeg
+            if (next_job.status == RenderStatus.COMPLETED.value
+                    and next_job.compose_layers and next_job.layercomp):
+                try:
+                    from src.ffmpeg_compose import compose_layer_comps
+                    out_dir = Path(next_job.output_path).parent if next_job.output_path else Path(next_job.project_file).parent
+                    if self.on_output:
+                        self.on_output(f"[{next_job.id}] Starting ffmpeg layer composition...")
+                    compose_layer_comps(str(out_dir), on_output=self.on_output)
+                except Exception as e:
+                    if self.on_output:
+                        self.on_output(f"[{next_job.id}] FFmpeg compose error: {e}")
+
             if next_job.status == RenderStatus.COMPLETED.value:
                 if self.on_job_completed:
                     self.on_job_completed(next_job)

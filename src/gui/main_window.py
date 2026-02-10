@@ -8,17 +8,336 @@ from PyQt6.QtWidgets import (
     QSpinBox, QFileDialog, QTableWidget, QTableWidgetItem, QHeaderView,
     QTextEdit, QSplitter, QStatusBar, QMenuBar, QMenu, QMessageBox,
     QProgressBar, QFormLayout, QGridLayout, QApplication, QAbstractItemView,
+    QDialog, QDialogButtonBox, QInputDialog, QScrollArea,
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QMimeData, QUrl
 from PyQt6.QtGui import QAction, QDragEnterEvent, QDropEvent, QIcon
 from src.config import (
     AppConfig, APP_NAME, APP_VERSION, APP_AUTHOR,
     FORMATS, WINDOWS_PRESETS, RESOLUTIONS, MOHO_FILE_EXTENSIONS,
-    QUALITY_LEVELS, QUEUE_DIR,
+    QUALITY_LEVELS, QUEUE_DIR, PRESETS_DIR,
 )
+import json
 from src.moho_renderer import RenderJob, RenderStatus
 from src.render_queue import RenderQueue
 from src.gui.styles import DARK_THEME
+
+
+class EditSettingsDialog(QDialog):
+    """Dialog for editing render settings of one or more queued jobs."""
+
+    def __init__(self, jobs, parent=None):
+        super().__init__(parent)
+        self.jobs = jobs
+        self.setWindowTitle(f"Edit Render Settings ({len(jobs)} job{'s' if len(jobs) > 1 else ''})")
+        self.setMinimumWidth(600)
+        self._setup_ui()
+        self._populate_from_jobs()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+
+        # --- Output Settings ---
+        self.chk_apply_output = QCheckBox("Apply Output Settings")
+        layout.addWidget(self.chk_apply_output)
+
+        self.output_group = QGroupBox("Output Settings")
+        output_form = QFormLayout(self.output_group)
+
+        self.combo_format = QComboBox()
+        self.combo_format.addItems(FORMATS)
+        self.combo_format.currentTextChanged.connect(self._update_presets)
+        output_form.addRow("Format:", self.combo_format)
+
+        self.combo_preset = QComboBox()
+        self._update_presets()
+        output_form.addRow("Preset/Codec:", self.combo_preset)
+
+        self.edit_output_dir = QLineEdit()
+        self.edit_output_dir.setPlaceholderText("Same folder as project file (default)")
+        browse_btn = QPushButton("Browse...")
+        browse_btn.setFixedWidth(80)
+        browse_btn.clicked.connect(self._browse_output_dir)
+        out_row = QHBoxLayout()
+        out_row.addWidget(self.edit_output_dir)
+        out_row.addWidget(browse_btn)
+        output_form.addRow("Output Folder:", out_row)
+
+        self.chk_subfolder_project = QCheckBox("Create subfolder with project name")
+        output_form.addRow("", self.chk_subfolder_project)
+
+        self.output_group.setEnabled(False)
+        self.chk_apply_output.toggled.connect(self.output_group.setEnabled)
+        layout.addWidget(self.output_group)
+
+        # --- Frame Range ---
+        self.chk_apply_frames = QCheckBox("Apply Frame Range")
+        layout.addWidget(self.chk_apply_frames)
+
+        self.frame_group = QGroupBox("Frame Range")
+        frame_layout = QHBoxLayout(self.frame_group)
+
+        self.chk_custom_frames = QCheckBox("Custom frame range")
+        frame_layout.addWidget(self.chk_custom_frames)
+
+        frame_layout.addWidget(QLabel("Start:"))
+        self.spin_start_frame = QSpinBox()
+        self.spin_start_frame.setRange(0, 999999)
+        self.spin_start_frame.setValue(1)
+        self.spin_start_frame.setEnabled(False)
+        frame_layout.addWidget(self.spin_start_frame)
+
+        frame_layout.addWidget(QLabel("End:"))
+        self.spin_end_frame = QSpinBox()
+        self.spin_end_frame.setRange(0, 999999)
+        self.spin_end_frame.setValue(24)
+        self.spin_end_frame.setEnabled(False)
+        frame_layout.addWidget(self.spin_end_frame)
+
+        self.chk_custom_frames.toggled.connect(self.spin_start_frame.setEnabled)
+        self.chk_custom_frames.toggled.connect(self.spin_end_frame.setEnabled)
+        frame_layout.addStretch()
+
+        self.frame_group.setEnabled(False)
+        self.chk_apply_frames.toggled.connect(self.frame_group.setEnabled)
+        layout.addWidget(self.frame_group)
+
+        # --- Render Options ---
+        self.chk_apply_options = QCheckBox("Apply Render Options")
+        layout.addWidget(self.chk_apply_options)
+
+        self.options_group = QGroupBox("Render Options")
+        options_grid = QGridLayout(self.options_group)
+
+        self.chk_multithread = QCheckBox("Multi-threaded rendering")
+        self.chk_multithread.setChecked(True)
+        self.chk_halfsize = QCheckBox("Render at half size")
+        self.chk_halffps = QCheckBox("Render at half frame rate")
+        self.chk_shapefx = QCheckBox("Apply shape effects")
+        self.chk_shapefx.setChecked(True)
+        self.chk_layerfx = QCheckBox("Apply layer effects")
+        self.chk_layerfx.setChecked(True)
+        self.chk_fewparticles = QCheckBox("Reduced particles")
+        self.chk_aa = QCheckBox("Antialiased edges")
+        self.chk_aa.setChecked(True)
+        self.chk_extrasmooth = QCheckBox("Extra-smooth images")
+        self.chk_premultiply = QCheckBox("Premultiply alpha")
+        self.chk_premultiply.setChecked(True)
+        self.chk_ntscsafe = QCheckBox("NTSC safe colors")
+        self.chk_verbose = QCheckBox("Verbose output")
+        self.chk_verbose.setChecked(True)
+
+        options_grid.addWidget(self.chk_multithread, 0, 0)
+        options_grid.addWidget(self.chk_halfsize, 0, 1)
+        options_grid.addWidget(self.chk_halffps, 0, 2)
+        options_grid.addWidget(self.chk_shapefx, 1, 0)
+        options_grid.addWidget(self.chk_layerfx, 1, 1)
+        options_grid.addWidget(self.chk_fewparticles, 1, 2)
+        options_grid.addWidget(self.chk_aa, 2, 0)
+        options_grid.addWidget(self.chk_extrasmooth, 2, 1)
+        options_grid.addWidget(self.chk_premultiply, 2, 2)
+        options_grid.addWidget(self.chk_ntscsafe, 3, 0)
+        options_grid.addWidget(self.chk_verbose, 3, 1)
+
+        self.chk_copy_images = QCheckBox("Copy \\Images to project root (fix offline media)")
+        options_grid.addWidget(self.chk_copy_images, 4, 0, 1, 3)
+
+        self.options_group.setEnabled(False)
+        self.chk_apply_options.toggled.connect(self.options_group.setEnabled)
+        layout.addWidget(self.options_group)
+
+        # --- Layer Compositions ---
+        self.chk_apply_layercomp = QCheckBox("Apply Layer Comp Settings")
+        layout.addWidget(self.chk_apply_layercomp)
+
+        self.lc_group = QGroupBox("Layer Compositions")
+        lc_layout = QFormLayout(self.lc_group)
+
+        self.edit_layercomp = QLineEdit()
+        self.edit_layercomp.setPlaceholderText("Leave empty for default, or AllComps / AllLayerComps")
+        lc_layout.addRow("Layer Comp:", self.edit_layercomp)
+
+        self.chk_addlayercompsuffix = QCheckBox("Add layer comp suffix to filename")
+        self.chk_createfolderforlayercomp = QCheckBox("Create folder for each layer comp")
+        self.chk_addformatsuffix = QCheckBox("Add format suffix to filename")
+
+        lc_opts = QHBoxLayout()
+        lc_opts.addWidget(self.chk_addlayercompsuffix)
+        lc_opts.addWidget(self.chk_createfolderforlayercomp)
+        lc_opts.addWidget(self.chk_addformatsuffix)
+        lc_layout.addRow("Options:", lc_opts)
+
+        self.chk_compose_layers = QCheckBox("Auto-compose all layer comps into MP4 with ffmpeg")
+        lc_layout.addRow("", self.chk_compose_layers)
+
+        self.lc_group.setEnabled(False)
+        self.chk_apply_layercomp.toggled.connect(self.lc_group.setEnabled)
+        layout.addWidget(self.lc_group)
+
+        # --- QT Options ---
+        self.chk_apply_qt = QCheckBox("Apply QuickTime Options")
+        layout.addWidget(self.chk_apply_qt)
+
+        self.qt_group = QGroupBox("QuickTime Options (QT format only)")
+        qt_layout = QFormLayout(self.qt_group)
+
+        self.combo_quality = QComboBox()
+        for val, name in QUALITY_LEVELS.items():
+            self.combo_quality.addItem(f"{val} - {name}", val)
+        self.combo_quality.setCurrentIndex(3)
+        qt_layout.addRow("Quality:", self.combo_quality)
+
+        self.spin_depth = QSpinBox()
+        self.spin_depth.setRange(1, 32)
+        self.spin_depth.setValue(24)
+        qt_layout.addRow("Pixel Depth:", self.spin_depth)
+
+        self.qt_group.setEnabled(False)
+        self.chk_apply_qt.toggled.connect(self.qt_group.setEnabled)
+        layout.addWidget(self.qt_group)
+
+        # --- Buttons ---
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Apply | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Apply).clicked.connect(self._apply)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _update_presets(self):
+        fmt = self.combo_format.currentText()
+        self.combo_preset.clear()
+        if fmt in WINDOWS_PRESETS:
+            self.combo_preset.addItems(WINDOWS_PRESETS[fmt])
+        else:
+            self.combo_preset.addItem("")
+
+    def _browse_output_dir(self):
+        folder = QFileDialog.getExistingDirectory(self, "Select Output Folder")
+        if folder:
+            self.edit_output_dir.setText(folder)
+
+    def _populate_from_jobs(self):
+        """Pre-populate fields from the first job (or single selected job)."""
+        job = self.jobs[0]
+
+        # Output
+        self.combo_format.setCurrentText(job.format or "MP4")
+        self._update_presets()
+        if job.options:
+            idx = self.combo_preset.findText(job.options)
+            if idx >= 0:
+                self.combo_preset.setCurrentIndex(idx)
+        if job.output_path:
+            self.edit_output_dir.setText(str(Path(job.output_path).parent))
+        self.chk_subfolder_project.setChecked(job.subfolder_project)
+
+        # Frame range
+        if job.start_frame is not None:
+            self.chk_custom_frames.setChecked(True)
+            self.spin_start_frame.setValue(job.start_frame)
+        if job.end_frame is not None:
+            self.spin_end_frame.setValue(job.end_frame)
+
+        # Render options
+        def _set_chk(chk, val):
+            if val is not None:
+                chk.setChecked(val)
+        _set_chk(self.chk_multithread, job.multithread)
+        _set_chk(self.chk_halfsize, job.halfsize)
+        _set_chk(self.chk_halffps, job.halffps)
+        _set_chk(self.chk_shapefx, job.shapefx)
+        _set_chk(self.chk_layerfx, job.layerfx)
+        _set_chk(self.chk_fewparticles, job.fewparticles)
+        _set_chk(self.chk_aa, job.aa)
+        _set_chk(self.chk_extrasmooth, job.extrasmooth)
+        _set_chk(self.chk_premultiply, job.premultiply)
+        _set_chk(self.chk_ntscsafe, job.ntscsafe)
+        self.chk_verbose.setChecked(job.verbose)
+        self.chk_copy_images.setChecked(job.copy_images)
+
+        # Layer comp
+        if job.layercomp:
+            self.edit_layercomp.setText(job.layercomp)
+        _set_chk(self.chk_addlayercompsuffix, job.addlayercompsuffix)
+        _set_chk(self.chk_createfolderforlayercomp, job.createfolderforlayercomps)
+        _set_chk(self.chk_addformatsuffix, job.addformatsuffix)
+        self.chk_compose_layers.setChecked(job.compose_layers)
+
+        # QT
+        if job.quality is not None:
+            idx = self.combo_quality.findData(job.quality)
+            if idx >= 0:
+                self.combo_quality.setCurrentIndex(idx)
+        if job.depth is not None:
+            self.spin_depth.setValue(job.depth)
+
+        # For single job, auto-check all groups
+        if len(self.jobs) == 1:
+            self.chk_apply_output.setChecked(True)
+            self.chk_apply_frames.setChecked(True)
+            self.chk_apply_options.setChecked(True)
+            self.chk_apply_layercomp.setChecked(True)
+            self.chk_apply_qt.setChecked(True)
+
+    def _apply(self):
+        """Apply checked settings to all selected jobs."""
+        ext_map = {
+            "JPEG": ".jpg", "TGA": ".tga", "BMP": ".bmp",
+            "PNG": ".png", "PSD": ".psd", "QT": ".mov",
+            "MP4": ".mp4", "Animated GIF": ".gif",
+        }
+
+        for job in self.jobs:
+            if self.chk_apply_output.isChecked():
+                job.format = self.combo_format.currentText()
+                job.options = self.combo_preset.currentText() or ""
+                job.subfolder_project = self.chk_subfolder_project.isChecked()
+                out_dir = self.edit_output_dir.text()
+                if out_dir:
+                    name = Path(job.project_file).stem
+                    ext = ext_map.get(job.format, ".mp4")
+                    if job.subfolder_project:
+                        job.output_path = os.path.join(out_dir, name, name + ext)
+                    else:
+                        job.output_path = os.path.join(out_dir, name + ext)
+                else:
+                    job.output_path = ""
+
+            if self.chk_apply_frames.isChecked():
+                if self.chk_custom_frames.isChecked():
+                    job.start_frame = self.spin_start_frame.value()
+                    job.end_frame = self.spin_end_frame.value()
+                else:
+                    job.start_frame = None
+                    job.end_frame = None
+
+            if self.chk_apply_options.isChecked():
+                job.verbose = self.chk_verbose.isChecked()
+                job.multithread = self.chk_multithread.isChecked()
+                job.halfsize = self.chk_halfsize.isChecked()
+                job.halffps = self.chk_halffps.isChecked()
+                job.shapefx = self.chk_shapefx.isChecked()
+                job.layerfx = self.chk_layerfx.isChecked()
+                job.fewparticles = self.chk_fewparticles.isChecked()
+                job.aa = self.chk_aa.isChecked()
+                job.extrasmooth = self.chk_extrasmooth.isChecked()
+                job.premultiply = self.chk_premultiply.isChecked()
+                job.ntscsafe = self.chk_ntscsafe.isChecked()
+                job.copy_images = self.chk_copy_images.isChecked()
+
+            if self.chk_apply_layercomp.isChecked():
+                lc = self.edit_layercomp.text().strip()
+                job.layercomp = lc if lc else ""
+                job.addlayercompsuffix = self.chk_addlayercompsuffix.isChecked()
+                job.createfolderforlayercomps = self.chk_createfolderforlayercomp.isChecked()
+                job.addformatsuffix = self.chk_addformatsuffix.isChecked()
+                job.compose_layers = self.chk_compose_layers.isChecked()
+
+            if self.chk_apply_qt.isChecked():
+                job.quality = self.combo_quality.currentData()
+                depth_val = self.spin_depth.value()
+                job.depth = depth_val if depth_val != 24 else None
+
+        self.accept()
 
 
 class MainWindow(QMainWindow):
@@ -41,7 +360,7 @@ class MainWindow(QMainWindow):
         self.queue.on_job_started = lambda j: self._emit_job_status(j.id, "rendering")
         self.queue.on_job_completed = lambda j: self._emit_job_status(j.id, "completed")
         self.queue.on_job_failed = lambda j: self._emit_job_status(j.id, "failed")
-        self.queue.on_queue_completed = lambda: self._emit_log("All queue jobs completed!")
+        self.queue.on_queue_completed = self._on_queue_completed
 
         # Network components
         self.master_server = None
@@ -51,6 +370,13 @@ class MainWindow(QMainWindow):
         self._connect_signals()
         self._setup_menu()
         self.setAcceptDrops(True)
+
+        # Load default preset if configured
+        default_preset = self.config.get("default_preset", "")
+        if default_preset:
+            idx = self.combo_render_preset.findText(default_preset)
+            if idx >= 0:
+                self.combo_render_preset.setCurrentIndex(idx)
 
         # Handle initial files from command line / context menu
         if initial_files:
@@ -159,14 +485,15 @@ class MainWindow(QMainWindow):
 
         # Queue table
         self.queue_table = QTableWidget()
-        self.queue_table.setColumnCount(8)
+        self.queue_table.setColumnCount(9)
         self.queue_table.setHorizontalHeaderLabels([
-            "Status", "Project", "Format", "Output", "Progress",
-            "Time", "Slave", "Actions"
+            "Status", "Project", "Format", "Layer Comp", "Output", "Progress",
+            "Time", "Slave", "ID"
         ])
         self.queue_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.queue_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        self.queue_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
         self.queue_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.queue_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.queue_table.setAlternatingRowColors(True)
         self.queue_table.verticalHeader().setVisible(False)
         self.queue_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -203,6 +530,28 @@ class MainWindow(QMainWindow):
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
+        # Presets bar
+        preset_group = QGroupBox("Render Presets")
+        preset_layout = QHBoxLayout(preset_group)
+        preset_layout.addWidget(QLabel("Preset:"))
+        self.combo_render_preset = QComboBox()
+        self.combo_render_preset.setMinimumWidth(200)
+        self.combo_render_preset.addItem("(none)")
+        self._load_preset_list()
+        self.combo_render_preset.currentTextChanged.connect(self._on_preset_selected)
+        preset_layout.addWidget(self.combo_render_preset)
+        self.btn_save_preset = QPushButton("Save Preset")
+        self.btn_save_preset.clicked.connect(self._save_preset)
+        preset_layout.addWidget(self.btn_save_preset)
+        self.btn_delete_preset = QPushButton("Delete Preset")
+        self.btn_delete_preset.clicked.connect(self._delete_preset)
+        preset_layout.addWidget(self.btn_delete_preset)
+        self.chk_default_preset = QCheckBox("Set as Default")
+        self.chk_default_preset.toggled.connect(self._set_default_preset)
+        preset_layout.addWidget(self.chk_default_preset)
+        preset_layout.addStretch()
+        layout.addWidget(preset_group)
+
         # Output settings
         output_group = QGroupBox("Output Settings")
         output_form = QFormLayout(output_group)
@@ -227,6 +576,9 @@ class MainWindow(QMainWindow):
         out_row.addWidget(self.edit_output_dir)
         out_row.addWidget(browse_out)
         output_form.addRow("Output Folder:", out_row)
+
+        self.chk_subfolder_project = QCheckBox("Create subfolder with project name")
+        output_form.addRow("", self.chk_subfolder_project)
 
         layout.addWidget(output_group)
 
@@ -291,6 +643,9 @@ class MainWindow(QMainWindow):
         options_grid.addWidget(self.chk_ntscsafe, 3, 0)
         options_grid.addWidget(self.chk_verbose, 3, 1)
 
+        self.chk_copy_images = QCheckBox("Copy \\Images to project root (fix offline media)")
+        options_grid.addWidget(self.chk_copy_images, 4, 0, 1, 3)
+
         layout.addWidget(options_group)
 
         # Layer comps
@@ -310,6 +665,9 @@ class MainWindow(QMainWindow):
         lc_opts.addWidget(self.chk_createfolderforlayercomp)
         lc_opts.addWidget(self.chk_addformatsuffix)
         lc_layout.addRow("Options:", lc_opts)
+
+        self.chk_compose_layers = QCheckBox("Auto-compose all layer comps into MP4 with ffmpeg")
+        lc_layout.addRow("", self.chk_compose_layers)
 
         layout.addWidget(lc_group)
 
@@ -559,6 +917,11 @@ class MainWindow(QMainWindow):
     def _emit_job_status(self, job_id, status):
         self.job_status_signal.emit(job_id, status)
 
+    def _on_queue_completed(self):
+        self._emit_log("All queue jobs completed!")
+        # Stop timer on main thread via signal
+        QTimer.singleShot(0, self._stop_render_timer)
+
     # --- Slots (run on main thread) ---
     def _append_log(self, msg):
         self.log_output.append(msg)
@@ -590,19 +953,20 @@ class MainWindow(QMainWindow):
             self.queue_table.setItem(row, 1, QTableWidgetItem(job.project_name))
             # Format
             self.queue_table.setItem(row, 2, QTableWidgetItem(f"{job.format}"))
+            # Layer Comp
+            self.queue_table.setItem(row, 3, QTableWidgetItem(job.layercomp or "(default)"))
             # Output
             out = job.output_path or "(project folder)"
-            self.queue_table.setItem(row, 3, QTableWidgetItem(out))
+            self.queue_table.setItem(row, 4, QTableWidgetItem(out))
             # Progress
             prog_item = QTableWidgetItem(f"{job.progress:.0f}%")
-            self.queue_table.setItem(row, 4, prog_item)
+            self.queue_table.setItem(row, 5, prog_item)
             # Time
-            self.queue_table.setItem(row, 5, QTableWidgetItem(job.elapsed_str))
+            self.queue_table.setItem(row, 6, QTableWidgetItem(job.elapsed_str))
             # Slave
-            self.queue_table.setItem(row, 6, QTableWidgetItem(job.assigned_slave or "Local"))
-            # Actions (store job_id in data)
-            actions_item = QTableWidgetItem(job.id)
-            self.queue_table.setItem(row, 7, actions_item)
+            self.queue_table.setItem(row, 7, QTableWidgetItem(job.assigned_slave or "Local"))
+            # ID (store job_id)
+            self.queue_table.setItem(row, 8, QTableWidgetItem(job.id))
 
         # Update global progress
         total = self.queue.total_jobs
@@ -618,9 +982,13 @@ class MainWindow(QMainWindow):
 
     def _update_job_progress(self, job_id, progress):
         for row in range(self.queue_table.rowCount()):
-            id_item = self.queue_table.item(row, 7)
+            id_item = self.queue_table.item(row, 8)
             if id_item and id_item.text() == job_id:
-                self.queue_table.setItem(row, 4, QTableWidgetItem(f"{progress:.0f}%"))
+                self.queue_table.setItem(row, 5, QTableWidgetItem(f"{progress:.0f}%"))
+                # Also update elapsed time
+                job = self.queue.get_job(job_id)
+                if job:
+                    self.queue_table.setItem(row, 6, QTableWidgetItem(job.elapsed_str))
                 break
 
     def _update_job_status(self, job_id, status):
@@ -666,6 +1034,7 @@ class MainWindow(QMainWindow):
         else:
             job.options = ""
 
+        job.subfolder_project = self.chk_subfolder_project.isChecked()
         if self.edit_output_dir.text():
             out_dir = self.edit_output_dir.text()
             name = Path(filepath).stem
@@ -675,7 +1044,10 @@ class MainWindow(QMainWindow):
                 "MP4": ".mp4", "Animated GIF": ".gif",
             }
             ext = ext_map.get(job.format, ".mp4")
-            job.output_path = os.path.join(out_dir, name + ext)
+            if job.subfolder_project:
+                job.output_path = os.path.join(out_dir, name, name + ext)
+            else:
+                job.output_path = os.path.join(out_dir, name + ext)
 
         if self.chk_custom_frames.isChecked():
             job.start_frame = self.spin_start_frame.value()
@@ -699,6 +1071,9 @@ class MainWindow(QMainWindow):
         job.addlayercompsuffix = self.chk_addlayercompsuffix.isChecked()
         job.createfolderforlayercomps = self.chk_createfolderforlayercomp.isChecked()
         job.addformatsuffix = self.chk_addformatsuffix.isChecked()
+        job.compose_layers = self.chk_compose_layers.isChecked()
+
+        job.copy_images = self.chk_copy_images.isChecked()
 
         if self.combo_format.currentText() == "QT":
             job.quality = self.combo_quality.currentData()
@@ -716,6 +1091,7 @@ class MainWindow(QMainWindow):
         # Update moho path
         self.queue.moho_path = self.edit_moho_path.text()
         self.queue.start()
+        self._start_render_timer()
         self._append_log("Queue started")
         self.status_bar.showMessage("Rendering...")
 
@@ -732,6 +1108,7 @@ class MainWindow(QMainWindow):
 
     def _stop_queue(self):
         self.queue.stop()
+        self._stop_render_timer()
         self._append_log("Queue stopped")
         self.btn_pause_queue.setText("Pause")
 
@@ -776,7 +1153,26 @@ class MainWindow(QMainWindow):
             return
         job = self.queue.jobs[row]
 
+        # Collect all selected jobs
+        selected_rows = sorted(set(idx.row() for idx in self.queue_table.selectedIndexes()))
+        selected_jobs = [self.queue.jobs[r] for r in selected_rows if r < len(self.queue.jobs)]
+        if not selected_jobs:
+            selected_jobs = [job]
+
         menu = QMenu(self)
+
+        # Edit Render Settings (for non-rendering jobs)
+        editable_jobs = [j for j in selected_jobs if j.status != RenderStatus.RENDERING.value]
+        if editable_jobs:
+            act_edit = menu.addAction(f"Edit Render Settings ({len(editable_jobs)} job{'s' if len(editable_jobs) > 1 else ''})")
+            act_edit.triggered.connect(lambda: self._edit_job_settings(editable_jobs))
+
+        # Show in Explorer
+        act_show = menu.addAction("Show in Explorer")
+        act_show.triggered.connect(lambda: self._show_in_explorer(job))
+
+        menu.addSeparator()
+
         if job.status in (RenderStatus.FAILED.value, RenderStatus.CANCELLED.value, RenderStatus.COMPLETED.value):
             act_retry = menu.addAction("Retry")
             act_retry.triggered.connect(lambda: self.queue.retry_job(job.id))
@@ -795,6 +1191,28 @@ class MainWindow(QMainWindow):
             act_cancel.triggered.connect(self.queue.cancel_current)
 
         menu.exec(self.queue_table.viewport().mapToGlobal(pos))
+
+    def _show_in_explorer(self, job):
+        """Open Windows Explorer with the project file selected."""
+        import subprocess
+        filepath = job.project_file
+        if os.path.exists(filepath):
+            subprocess.Popen(['explorer', '/select,', os.path.normpath(filepath)])
+        else:
+            # Open the parent folder if file doesn't exist
+            folder = os.path.dirname(filepath)
+            if os.path.exists(folder):
+                subprocess.Popen(['explorer', os.path.normpath(folder)])
+            else:
+                QMessageBox.warning(self, "Not Found", f"File not found:\n{filepath}")
+
+    def _edit_job_settings(self, jobs):
+        """Open the Edit Render Settings dialog for the given jobs."""
+        dialog = EditSettingsDialog(jobs, parent=self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            if self.queue.on_queue_changed:
+                self.queue.on_queue_changed()
+            self._append_log(f"Updated render settings for {len(jobs)} job{'s' if len(jobs) > 1 else ''}")
 
     # --- Drag and drop ---
     def dragEnterEvent(self, event: QDragEnterEvent):
@@ -945,6 +1363,188 @@ class MainWindow(QMainWindow):
             self.slaves_table.setItem(row, 3, QTableWidgetItem(slave.current_job_id))
             self.slaves_table.setItem(row, 4, QTableWidgetItem(str(slave.jobs_completed)))
             self.slaves_table.setItem(row, 5, QTableWidgetItem(str(slave.jobs_failed)))
+
+    # --- Render Presets ---
+    def _load_preset_list(self):
+        """Populate the preset combo from saved JSON files in PRESETS_DIR."""
+        PRESETS_DIR.mkdir(parents=True, exist_ok=True)
+        for f in sorted(PRESETS_DIR.glob("*.json")):
+            name = f.stem
+            self.combo_render_preset.addItem(name)
+        # Select default preset if configured
+        default_name = self.config.get("default_preset", "")
+        if default_name:
+            idx = self.combo_render_preset.findText(default_name)
+            if idx >= 0:
+                self.combo_render_preset.setCurrentIndex(idx)
+                self.chk_default_preset.setChecked(True)
+
+    def _on_preset_selected(self, name):
+        """Load preset settings into widgets when a preset is selected."""
+        if name == "(none)" or not name:
+            return
+        preset_file = PRESETS_DIR / f"{name}.json"
+        if not preset_file.exists():
+            return
+        try:
+            with open(preset_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, IOError):
+            return
+
+        # Output settings
+        self.combo_format.setCurrentText(data.get("format", "MP4"))
+        self._update_presets()
+        opts = data.get("options", "")
+        if opts:
+            idx = self.combo_preset.findText(opts)
+            if idx >= 0:
+                self.combo_preset.setCurrentIndex(idx)
+        self.edit_output_dir.setText(data.get("output_dir", ""))
+        self.chk_subfolder_project.setChecked(data.get("subfolder_project", False))
+
+        # Frame range
+        custom_frames = data.get("custom_frames", False)
+        self.chk_custom_frames.setChecked(custom_frames)
+        if custom_frames:
+            self.spin_start_frame.setValue(data.get("start_frame", 1))
+            self.spin_end_frame.setValue(data.get("end_frame", 24))
+
+        # Render options
+        self.chk_multithread.setChecked(data.get("multithread", True))
+        self.chk_halfsize.setChecked(data.get("halfsize", False))
+        self.chk_halffps.setChecked(data.get("halffps", False))
+        self.chk_shapefx.setChecked(data.get("shapefx", True))
+        self.chk_layerfx.setChecked(data.get("layerfx", True))
+        self.chk_fewparticles.setChecked(data.get("fewparticles", False))
+        self.chk_aa.setChecked(data.get("aa", True))
+        self.chk_extrasmooth.setChecked(data.get("extrasmooth", False))
+        self.chk_premultiply.setChecked(data.get("premultiply", True))
+        self.chk_ntscsafe.setChecked(data.get("ntscsafe", False))
+        self.chk_verbose.setChecked(data.get("verbose", True))
+        self.chk_copy_images.setChecked(data.get("copy_images", False))
+
+        # Layer comps
+        self.edit_layercomp.setText(data.get("layercomp", ""))
+        self.chk_addlayercompsuffix.setChecked(data.get("addlayercompsuffix", False))
+        self.chk_createfolderforlayercomp.setChecked(data.get("createfolderforlayercomps", False))
+        self.chk_addformatsuffix.setChecked(data.get("addformatsuffix", False))
+        self.chk_compose_layers.setChecked(data.get("compose_layers", False))
+
+        # QT options
+        quality = data.get("quality", 3)
+        idx = self.combo_quality.findData(quality)
+        if idx >= 0:
+            self.combo_quality.setCurrentIndex(idx)
+        self.spin_depth.setValue(data.get("depth", 24))
+
+    def _save_preset(self):
+        """Save current render settings as a named preset."""
+        name, ok = QInputDialog.getText(self, "Save Preset", "Preset name:")
+        if not ok or not name.strip():
+            return
+        name = name.strip()
+        data = {
+            "format": self.combo_format.currentText(),
+            "options": self.combo_preset.currentText(),
+            "output_dir": self.edit_output_dir.text(),
+            "subfolder_project": self.chk_subfolder_project.isChecked(),
+            "custom_frames": self.chk_custom_frames.isChecked(),
+            "start_frame": self.spin_start_frame.value(),
+            "end_frame": self.spin_end_frame.value(),
+            "multithread": self.chk_multithread.isChecked(),
+            "halfsize": self.chk_halfsize.isChecked(),
+            "halffps": self.chk_halffps.isChecked(),
+            "shapefx": self.chk_shapefx.isChecked(),
+            "layerfx": self.chk_layerfx.isChecked(),
+            "fewparticles": self.chk_fewparticles.isChecked(),
+            "aa": self.chk_aa.isChecked(),
+            "extrasmooth": self.chk_extrasmooth.isChecked(),
+            "premultiply": self.chk_premultiply.isChecked(),
+            "ntscsafe": self.chk_ntscsafe.isChecked(),
+            "verbose": self.chk_verbose.isChecked(),
+            "copy_images": self.chk_copy_images.isChecked(),
+            "layercomp": self.edit_layercomp.text(),
+            "addlayercompsuffix": self.chk_addlayercompsuffix.isChecked(),
+            "createfolderforlayercomps": self.chk_createfolderforlayercomp.isChecked(),
+            "addformatsuffix": self.chk_addformatsuffix.isChecked(),
+            "compose_layers": self.chk_compose_layers.isChecked(),
+            "quality": self.combo_quality.currentData(),
+            "depth": self.spin_depth.value(),
+        }
+        PRESETS_DIR.mkdir(parents=True, exist_ok=True)
+        preset_file = PRESETS_DIR / f"{name}.json"
+        try:
+            with open(preset_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+        except IOError as e:
+            QMessageBox.critical(self, "Error", f"Failed to save preset:\n{e}")
+            return
+        # Add to combo if new
+        if self.combo_render_preset.findText(name) < 0:
+            self.combo_render_preset.addItem(name)
+        self.combo_render_preset.setCurrentText(name)
+        self._append_log(f"Preset saved: {name}")
+
+    def _delete_preset(self):
+        """Delete the currently selected preset."""
+        name = self.combo_render_preset.currentText()
+        if name == "(none)" or not name:
+            return
+        reply = QMessageBox.question(
+            self, "Delete Preset",
+            f"Delete preset '{name}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        preset_file = PRESETS_DIR / f"{name}.json"
+        if preset_file.exists():
+            preset_file.unlink()
+        idx = self.combo_render_preset.findText(name)
+        if idx >= 0:
+            self.combo_render_preset.removeItem(idx)
+        # Clear default if it was this preset
+        if self.config.get("default_preset") == name:
+            self.config.set("default_preset", "")
+            self.chk_default_preset.setChecked(False)
+        self._append_log(f"Preset deleted: {name}")
+
+    def _set_default_preset(self, checked):
+        """Set or clear the default preset."""
+        if checked:
+            name = self.combo_render_preset.currentText()
+            if name and name != "(none)":
+                self.config.set("default_preset", name)
+            else:
+                self.chk_default_preset.setChecked(False)
+        else:
+            self.config.set("default_preset", "")
+
+    # --- Render Timer for real-time table updates ---
+    def _start_render_timer(self):
+        """Start a 1-second timer to update Progress and Time columns."""
+        if not hasattr(self, '_render_timer'):
+            self._render_timer = QTimer()
+            self._render_timer.timeout.connect(self._on_render_timer_tick)
+        self._render_timer.start(1000)
+
+    def _stop_render_timer(self):
+        """Stop the render timer."""
+        if hasattr(self, '_render_timer'):
+            self._render_timer.stop()
+
+    def _on_render_timer_tick(self):
+        """Update Progress and Time columns for the currently rendering job."""
+        current = self.queue.current_job
+        if current is None:
+            return
+        for row in range(self.queue_table.rowCount()):
+            id_item = self.queue_table.item(row, 8)
+            if id_item and id_item.text() == current.id:
+                self.queue_table.setItem(row, 5, QTableWidgetItem(f"{current.progress:.0f}%"))
+                self.queue_table.setItem(row, 6, QTableWidgetItem(current.elapsed_str))
+                break
 
     def closeEvent(self, event):
         if self.queue.is_running:

@@ -4,13 +4,14 @@ import os
 from pathlib import Path
 
 APP_NAME = "Moho Render Farm"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 APP_AUTHOR = "Damian Turkieh"
 
 DEFAULT_MOHO_PATH = r"C:\Program Files\Moho 14\Moho.exe"
 CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "MohoRenderFarm"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 QUEUE_DIR = CONFIG_DIR / "queues"
+PRESETS_DIR = CONFIG_DIR / "presets"
 
 DEFAULT_CONFIG = {
     "moho_path": DEFAULT_MOHO_PATH,
@@ -24,6 +25,7 @@ DEFAULT_CONFIG = {
     "recent_projects": [],
     "recent_queues": [],
     "max_recent": 20,
+    "default_preset": "",
 }
 
 FORMATS = [
@@ -111,6 +113,7 @@ class AppConfig:
     def _ensure_dirs(self):
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         QUEUE_DIR.mkdir(parents=True, exist_ok=True)
+        PRESETS_DIR.mkdir(parents=True, exist_ok=True)
 
     def load(self):
         if CONFIG_FILE.exists():
