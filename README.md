@@ -19,6 +19,22 @@ Created by **Damian Turkieh**
 
 ---
 
+## Screenshots
+
+### Render Queue
+![Render Queue](screenshots/01_render_queue.png)
+
+### Render Settings
+![Render Settings](screenshots/02_render_settings.png)
+
+### Render Farm
+![Render Farm](screenshots/03_render_farm.png)
+
+### App Settings
+![App Settings](screenshots/04_app_settings.png)
+
+---
+
 ## Quick Start
 
 ### Installation
