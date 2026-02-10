@@ -1,8 +1,8 @@
 """
-Moho Batch Render - Main Entry Point
+Moho Render Farm - Main Entry Point
 Created by Damian Turkieh
 
-A comprehensive batch rendering tool for Moho Animation v14.
+A comprehensive render farm and batch rendering tool for Moho Animation v14.
 Supports individual and queue-based rendering, master/slave
 render farm, and full CLI automation.
 """
@@ -22,7 +22,7 @@ def run_gui(initial_files=None, add_to_queue_files=None):
     from src.gui.styles import DARK_THEME
 
     app = QApplication(sys.argv)
-    app.setApplicationName("Moho Batch Render")
+    app.setApplicationName("Moho Render Farm")
     app.setOrganizationName("Damian Turkieh")
     app.setStyleSheet(DARK_THEME)
 
@@ -38,8 +38,8 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        prog="moho-batch-render",
-        description="Moho Batch Render - Batch rendering tool for Moho Animation v14. By Damian Turkieh.",
+        prog="moho-render-farm",
+        description="Moho Render Farm - Render farm and batch rendering tool for Moho Animation v14. By Damian Turkieh.",
     )
     parser.add_argument("--render", "-r", nargs="+", metavar="FILE",
                         help="Render one or more Moho project files immediately")

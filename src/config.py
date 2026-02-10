@@ -3,12 +3,12 @@ import json
 import os
 from pathlib import Path
 
-APP_NAME = "Moho Batch Render"
+APP_NAME = "Moho Render Farm"
 APP_VERSION = "1.0.0"
 APP_AUTHOR = "Damian Turkieh"
 
 DEFAULT_MOHO_PATH = r"C:\Program Files\Moho 14\Moho.exe"
-CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "MohoBatchRender"
+CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "MohoRenderFarm"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 QUEUE_DIR = CONFIG_DIR / "queues"
 

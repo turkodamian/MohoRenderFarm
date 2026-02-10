@@ -5,9 +5,9 @@ import winreg
 from pathlib import Path
 
 
-APP_NAME = "MohoBatchRender"
-MENU_RENDER = "Render with Moho Batch Render"
-MENU_ADD_QUEUE = "Add to Moho Batch Render Queue"
+APP_NAME = "MohoRenderFarm"
+MENU_RENDER = "Render with Moho Render Farm"
+MENU_ADD_QUEUE = "Add to Moho Render Farm Queue"
 
 
 def get_app_path():
@@ -39,7 +39,7 @@ def register_context_menu():
                 winreg.SetValue(key, "", winreg.REG_SZ, "Moho Animation Project")
 
             # Shell - Render command
-            shell_render = f"{type_key_path}\\shell\\MohoBatchRender"
+            shell_render = f"{type_key_path}\\shell\\MohoRenderFarm"
             with winreg.CreateKey(winreg.HKEY_CURRENT_USER, shell_render) as key:
                 winreg.SetValueEx(key, "", 0, winreg.REG_SZ, MENU_RENDER)
                 winreg.SetValueEx(key, "Icon", 0, winreg.REG_SZ, f'"{python}"')
@@ -50,7 +50,7 @@ def register_context_menu():
                                   f'"{python}" "{app_path}" --render "%1"')
 
             # Shell - Add to queue command
-            shell_queue = f"{type_key_path}\\shell\\MohoBatchRenderQueue"
+            shell_queue = f"{type_key_path}\\shell\\MohoRenderFarmQueue"
             with winreg.CreateKey(winreg.HKEY_CURRENT_USER, shell_queue) as key:
                 winreg.SetValueEx(key, "", 0, winreg.REG_SZ, MENU_ADD_QUEUE)
                 winreg.SetValueEx(key, "Icon", 0, winreg.REG_SZ, f'"{python}"')
@@ -102,7 +102,7 @@ def is_context_menu_registered():
     """Check if context menu is already registered."""
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
-                            "Software\\Classes\\MohoProject.moho\\shell\\MohoBatchRender"):
+                            "Software\\Classes\\MohoProject.moho\\shell\\MohoRenderFarm"):
             return True
     except OSError:
         return False

@@ -1,4 +1,4 @@
-"""Main application window for Moho Batch Render."""
+"""Main application window for Moho Render Farm."""
 import os
 import sys
 from pathlib import Path
@@ -434,7 +434,7 @@ class MainWindow(QMainWindow):
 
         ctx_info = QLabel(
             "Register right-click context menu for .moho files.\n"
-            "This adds 'Render with Moho Batch Render' and 'Add to Queue' options."
+            "This adds 'Render with Moho Render Farm' and 'Add to Queue' options."
         )
         ctx_info.setWordWrap(True)
         ctx_layout.addWidget(ctx_info)
