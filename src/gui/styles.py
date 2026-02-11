@@ -1,4 +1,8 @@
 """Application styles and theme."""
+import os
+
+_STYLE_DIR = os.path.dirname(os.path.abspath(__file__))
+_CHECK_IMAGE_PATH = os.path.join(_STYLE_DIR, "check.svg").replace("\\", "/")
 
 DARK_THEME = """
 QMainWindow, QDialog {
@@ -116,6 +120,7 @@ QCheckBox::indicator {
 QCheckBox::indicator:checked {
     background-color: #89b4fa;
     border-color: #89b4fa;
+    image: url(__CHECK_IMAGE__);
 }
 QTabWidget::pane {
     border: 1px solid #45475a;
@@ -246,4 +251,4 @@ QToolTip {
     border: 1px solid #45475a;
     padding: 4px;
 }
-"""
+""".replace("__CHECK_IMAGE__", _CHECK_IMAGE_PATH)

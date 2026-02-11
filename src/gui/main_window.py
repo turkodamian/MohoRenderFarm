@@ -1,6 +1,7 @@
 """Main application window for Moho Render Farm."""
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
@@ -15,7 +16,7 @@ from PyQt6.QtGui import QAction, QDragEnterEvent, QDropEvent, QIcon
 from src.config import (
     AppConfig, APP_NAME, APP_VERSION, APP_AUTHOR,
     FORMATS, WINDOWS_PRESETS, RESOLUTIONS, MOHO_FILE_EXTENSIONS,
-    QUALITY_LEVELS, QUEUE_DIR, PRESETS_DIR,
+    QUALITY_LEVELS, QUEUE_DIR, PRESETS_DIR, CONFIG_DIR,
 )
 import json
 from src.moho_renderer import RenderJob, RenderStatus
@@ -153,9 +154,16 @@ class EditSettingsDialog(QDialog):
         self.lc_group = QGroupBox("Layer Compositions")
         lc_layout = QFormLayout(self.lc_group)
 
+        lc_row = QHBoxLayout()
+        self.chk_allcomps = QCheckBox("Render AllComps")
+        self.chk_allcomps.toggled.connect(self._on_allcomps_toggled)
+        lc_row.addWidget(self.chk_allcomps)
+        lc_row.addSpacing(20)
+        lc_row.addWidget(QLabel("Custom Layer Comp:"))
         self.edit_layercomp = QLineEdit()
-        self.edit_layercomp.setPlaceholderText("Leave empty for default, or AllComps / AllLayerComps")
-        lc_layout.addRow("Layer Comp:", self.edit_layercomp)
+        self.edit_layercomp.setPlaceholderText("Enter comp name or AllLayerComps")
+        lc_row.addWidget(self.edit_layercomp, 1)
+        lc_layout.addRow("", lc_row)
 
         self.chk_addlayercompsuffix = QCheckBox("Add layer comp suffix to filename")
         self.chk_createfolderforlayercomp = QCheckBox("Create folder for each layer comp")
@@ -210,6 +218,13 @@ class EditSettingsDialog(QDialog):
         else:
             self.combo_preset.addItem("")
 
+    def _on_allcomps_toggled(self, checked):
+        self.edit_layercomp.setEnabled(not checked)
+        if checked:
+            self.edit_layercomp.setText("AllComps")
+        else:
+            self.edit_layercomp.clear()
+
     def _browse_output_dir(self):
         folder = QFileDialog.getExistingDirectory(self, "Select Output Folder")
         if folder:
@@ -255,7 +270,10 @@ class EditSettingsDialog(QDialog):
         self.chk_copy_images.setChecked(job.copy_images)
 
         # Layer comp
-        if job.layercomp:
+        if job.layercomp and job.layercomp.lower() in ("allcomps", "alllayercomps"):
+            self.chk_allcomps.setChecked(True)
+        elif job.layercomp:
+            self.chk_allcomps.setChecked(False)
             self.edit_layercomp.setText(job.layercomp)
         _set_chk(self.chk_addlayercompsuffix, job.addlayercompsuffix)
         _set_chk(self.chk_createfolderforlayercomp, job.createfolderforlayercomps)
@@ -652,9 +670,16 @@ class MainWindow(QMainWindow):
         lc_group = QGroupBox("Layer Compositions")
         lc_layout = QFormLayout(lc_group)
 
+        lc_row = QHBoxLayout()
+        self.chk_allcomps = QCheckBox("Render AllComps")
+        self.chk_allcomps.toggled.connect(self._on_allcomps_toggled)
+        lc_row.addWidget(self.chk_allcomps)
+        lc_row.addSpacing(20)
+        lc_row.addWidget(QLabel("Custom Layer Comp:"))
         self.edit_layercomp = QLineEdit()
-        self.edit_layercomp.setPlaceholderText("Leave empty for default, or enter comp name / AllComps / AllLayerComps")
-        lc_layout.addRow("Layer Comp:", self.edit_layercomp)
+        self.edit_layercomp.setPlaceholderText("Enter comp name or AllLayerComps")
+        lc_row.addWidget(self.edit_layercomp, 1)
+        lc_layout.addRow("", lc_row)
 
         self.chk_addlayercompsuffix = QCheckBox("Add layer comp suffix to filename")
         self.chk_createfolderforlayercomp = QCheckBox("Create folder for each layer comp")
@@ -924,9 +949,18 @@ class MainWindow(QMainWindow):
 
     # --- Slots (run on main thread) ---
     def _append_log(self, msg):
-        self.log_output.append(msg)
+        timestamp = datetime.now().strftime("[%H:%M:%S]")
+        line = f"{timestamp} {msg}"
+        self.log_output.append(line)
         sb = self.log_output.verticalScrollBar()
         sb.setValue(sb.maximum())
+        # Auto-save to log file
+        if hasattr(self, '_log_file_handle') and self._log_file_handle:
+            try:
+                self._log_file_handle.write(line + "\n")
+                self._log_file_handle.flush()
+            except (IOError, OSError):
+                pass
 
     def _refresh_queue_table(self):
         jobs = self.queue.jobs
@@ -1083,6 +1117,29 @@ class MainWindow(QMainWindow):
 
         return job
 
+    # --- Log file auto-save ---
+    def _open_log_file(self):
+        """Open a log file for auto-saving output during queue execution."""
+        try:
+            log_dir = CONFIG_DIR / "logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            log_path = log_dir / f"queue_{ts}.log"
+            self._log_file_handle = open(log_path, "w", encoding="utf-8")
+            self._append_log(f"Log auto-save: {log_path}")
+        except (IOError, OSError) as e:
+            self._log_file_handle = None
+            self._append_log(f"Warning: Could not open log file: {e}")
+
+    def _close_log_file(self):
+        """Close the auto-save log file."""
+        if hasattr(self, '_log_file_handle') and self._log_file_handle:
+            try:
+                self._log_file_handle.close()
+            except (IOError, OSError):
+                pass
+            self._log_file_handle = None
+
     # --- Queue actions ---
     def _start_queue(self):
         if not self.queue.jobs:
@@ -1090,6 +1147,7 @@ class MainWindow(QMainWindow):
             return
         # Update moho path
         self.queue.moho_path = self.edit_moho_path.text()
+        self._open_log_file()
         self.queue.start()
         self._start_render_timer()
         self._append_log("Queue started")
@@ -1110,6 +1168,7 @@ class MainWindow(QMainWindow):
         self.queue.stop()
         self._stop_render_timer()
         self._append_log("Queue stopped")
+        self._close_log_file()
         self.btn_pause_queue.setText("Pause")
 
     def _clear_all_confirm(self):
@@ -1237,6 +1296,14 @@ class MainWindow(QMainWindow):
             elif p.suffix.lower() in MOHO_FILE_EXTENSIONS:
                 self._add_file_to_queue(str(p))
         event.acceptProposedAction()
+
+    # --- AllComps toggle ---
+    def _on_allcomps_toggled(self, checked):
+        self.edit_layercomp.setEnabled(not checked)
+        if checked:
+            self.edit_layercomp.setText("AllComps")
+        else:
+            self.edit_layercomp.clear()
 
     # --- Format/preset handling ---
     def _on_format_changed(self, fmt):
@@ -1425,7 +1492,12 @@ class MainWindow(QMainWindow):
         self.chk_copy_images.setChecked(data.get("copy_images", False))
 
         # Layer comps
-        self.edit_layercomp.setText(data.get("layercomp", ""))
+        lc_value = data.get("layercomp", "")
+        if lc_value.lower() in ("allcomps", "alllayercomps"):
+            self.chk_allcomps.setChecked(True)
+        else:
+            self.chk_allcomps.setChecked(False)
+            self.edit_layercomp.setText(lc_value)
         self.chk_addlayercompsuffix.setChecked(data.get("addlayercompsuffix", False))
         self.chk_createfolderforlayercomp.setChecked(data.get("createfolderforlayercomps", False))
         self.chk_addformatsuffix.setChecked(data.get("addformatsuffix", False))
@@ -1530,9 +1602,10 @@ class MainWindow(QMainWindow):
         self._render_timer.start(1000)
 
     def _stop_render_timer(self):
-        """Stop the render timer."""
+        """Stop the render timer and close log file."""
         if hasattr(self, '_render_timer'):
             self._render_timer.stop()
+        self._close_log_file()
 
     def _on_render_timer_tick(self):
         """Update Progress and Time columns for the currently rendering job."""
@@ -1562,6 +1635,8 @@ class MainWindow(QMainWindow):
             self.master_server.stop()
         if self.slave_client:
             self.slave_client.stop()
+
+        self._close_log_file()
 
         # Save moho path if changed
         self.config.moho_path = self.edit_moho_path.text()

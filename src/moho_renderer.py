@@ -415,6 +415,10 @@ class _HeartbeatThread:
             self._thread.join(timeout=2)
 
     def _run(self):
+        prev_progress = 0.0
+        stale_cycles = 0
+        ever_had_progress = False
+
         while self._running:
             time.sleep(self._interval)
             if not self._running:
@@ -422,11 +426,26 @@ class _HeartbeatThread:
             elapsed = time.time() - (self._job.start_time or time.time())
             elapsed_str = _format_elapsed(elapsed)
             progress = self._job.progress
+
+            if progress > 0:
+                ever_had_progress = True
+
+            # Detect stale progress (same value for multiple heartbeat cycles)
+            if abs(progress - prev_progress) < 0.1 and progress >= 95:
+                stale_cycles += 1
+            else:
+                stale_cycles = 0
+            prev_progress = progress
+
             if self._on_output:
-                if progress > 0:
+                if not ever_had_progress:
+                    self._on_output(f"[{self._job.id}] Loading project... Elapsed: {elapsed_str}")
+                elif stale_cycles >= 2:
+                    self._on_output(f"[{self._job.id}] Processing additional layer comps... Elapsed: {elapsed_str}")
+                elif progress > 0:
                     self._on_output(f"[{self._job.id}] Rendering... {progress:.0f}% - Elapsed: {elapsed_str}")
                 else:
-                    self._on_output(f"[{self._job.id}] Rendering... Elapsed: {elapsed_str}")
+                    self._on_output(f"[{self._job.id}] Processing next layer comp... Elapsed: {elapsed_str}")
 
 
 class LogMonitor:
@@ -493,8 +512,15 @@ class LogMonitor:
     def _parse_progress(self, line: str):
         """Try to extract progress from Moho log output.
         Moho outputs: 'Frame 1 (1/5)  X.XX secs/frame  Y.YY secs remaining'
+        Also detects 'Done!' to reset progress tracking for next layer comp.
         """
         line_stripped = line.strip()
+
+        # Detect "Done!" - signals a layer comp finished rendering
+        if line_stripped == "Done!":
+            self._last_progress = -1.0
+            return
+
         # Match pattern: Frame N (current/total)
         if line_stripped.startswith("Frame "):
             try:

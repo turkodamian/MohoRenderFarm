@@ -15,7 +15,9 @@ Created by **Damian Turkieh**
 - **All Moho Render Options** - Format, codec, frame range, layer comps, antialiasing, multithreading, and more
 - **Queue Management** - Save/load queues, reorder, retry, duplicate jobs
 - **Render Settings Presets** - Save/load/delete render presets with default preset support
-- **Real-time Progress** - Live progress and elapsed time updates during rendering
+- **Real-time Progress** - Live progress and elapsed time updates during rendering with smart status messages
+- **Timestamped Log Output** - All log lines include `[HH:MM:SS]` timestamps
+- **Auto-save Log** - Output log is automatically saved to file during queue execution
 - **FFmpeg Layer Composition** - Auto-compose layer comp PNG sequences into MP4 after rendering
 - **Project Subfolder Output** - Automatically create subfolders named after each project
 - **Images Copy** - Copy `\Images` media to project root to fix offline media references
@@ -110,7 +112,8 @@ Save and load your render settings as named presets. Set a default preset that l
 | Premultiply Alpha | Premultiply alpha channel | Yes |
 | NTSC Safe Colors | Clamp to NTSC-safe range | No |
 | Copy Images | Copy `\Images` folder to project root (fix offline media) | No |
-| Layer Comp | Specific layer comp or AllComps/AllLayerComps | None |
+| Render AllComps | Checkbox to render all layer comps at once | No |
+| Custom Layer Comp | Specific layer comp name or AllLayerComps | None |
 | Add Layer Comp Suffix | Append comp name to filename | No |
 | Create Folder for Layer Comp | Subfolder per comp | No |
 | Add Format Suffix | Append format name to filename | No |
@@ -334,7 +337,8 @@ MohoRenderFarm/
 │   ├── ffmpeg_compose.py   # FFmpeg layer comp compositor
 │   ├── gui/
 │   │   ├── main_window.py  # Main GUI window
-│   │   └── styles.py       # Dark theme styles
+│   │   ├── styles.py       # Dark theme styles
+│   │   └── check.svg       # Checkbox indicator icon
 │   ├── network/
 │   │   ├── master.py       # Render farm master server
 │   │   └── slave.py        # Render farm slave client
@@ -368,10 +372,21 @@ Configuration is stored in `%APPDATA%\MohoRenderFarm\config.json` and includes:
 
 Saved queues are stored in `%APPDATA%\MohoRenderFarm\queues\`.
 Render presets are stored in `%APPDATA%\MohoRenderFarm\presets\`.
+Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 
 ---
 
 ## Changelog
+
+### v1.2.0
+- **Checkbox X Indicator** - Active checkboxes now display a visible X mark for better visual feedback
+- **Render AllComps Checkbox** - Dedicated checkbox in Layer Compositions to quickly render all layer comps
+- **Custom Layer Comp Field** - Renamed and paired with AllComps checkbox for clearer workflow
+- **Smart Heartbeat Messages** - Loading phase shows "Loading project...", stale progress shows "Processing additional layer comps..."
+- **Layer Comp Transition Detection** - Log monitor resets progress tracking on "Done!" for multi-comp renders
+- **Timestamped Log Output** - All log lines include `[HH:MM:SS]` timestamps
+- **Auto-save Log** - Output log automatically saved to `%APPDATA%\MohoRenderFarm\logs\` during queue execution
+- **Git LFS Installer Step** - install.bat now auto-pulls Git LFS files (ffmpeg binaries) on fresh clones
 
 ### v1.1.0
 - **Render Settings Presets** - Save/load/delete render presets with default preset support
