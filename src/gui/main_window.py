@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
     QDialog, QDialogButtonBox, QInputDialog, QScrollArea,
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QMimeData, QUrl
-from PyQt6.QtGui import QAction, QDragEnterEvent, QDropEvent, QIcon
+from PyQt6.QtGui import QAction, QDragEnterEvent, QDropEvent, QIcon, QShortcut, QKeySequence
 from src.config import (
     AppConfig, APP_NAME, APP_VERSION, APP_AUTHOR,
     FORMATS, WINDOWS_PRESETS, RESOLUTIONS, MOHO_FILE_EXTENSIONS,
@@ -1039,6 +1039,10 @@ class MainWindow(QMainWindow):
         self.btn_register_ctx.clicked.connect(self._register_context_menu)
         self.btn_unregister_ctx.clicked.connect(self._unregister_context_menu)
 
+        # Keyboard shortcuts
+        QShortcut(QKeySequence(Qt.Key.Key_Delete), self, self._delete_selected_jobs)
+        QShortcut(QKeySequence(Qt.Key.Key_Escape), self, self._stop_queue)
+
     def _setup_menu(self):
         menubar = self.menuBar()
 
@@ -1084,12 +1088,18 @@ class MainWindow(QMainWindow):
         act_pause.triggered.connect(self._pause_queue)
         queue_menu.addAction(act_pause)
 
-        act_stop = QAction("Stop Queue", self)
+        act_stop = QAction("Stop Queue (Escape)", self)
         act_stop.setShortcut("F7")
         act_stop.triggered.connect(self._stop_queue)
         queue_menu.addAction(act_stop)
 
         queue_menu.addSeparator()
+
+        act_remove = QAction("Remove Selected", self)
+        act_remove.setShortcut("Delete")
+        act_remove.triggered.connect(self._delete_selected_jobs)
+        queue_menu.addAction(act_remove)
+
         act_clear_done = QAction("Clear Completed", self)
         act_clear_done.triggered.connect(self.queue.clear_completed)
         queue_menu.addAction(act_clear_done)
@@ -1369,6 +1379,18 @@ class MainWindow(QMainWindow):
                 self._append_log(f"Queue loaded: {filepath}")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to load queue:\n{e}")
+
+    # --- Delete selected jobs via keyboard ---
+    def _delete_selected_jobs(self):
+        """Remove selected jobs from the queue (Delete key)."""
+        selected_rows = sorted(set(idx.row() for idx in self.queue_table.selectedIndexes()), reverse=True)
+        if not selected_rows:
+            return
+        for row in selected_rows:
+            if row < len(self.queue.jobs):
+                job = self.queue.jobs[row]
+                if job.status != RenderStatus.RENDERING.value:
+                    self.queue.remove_job(job.id)
 
     # --- Context menu for queue table ---
     def _show_queue_context_menu(self, pos):
