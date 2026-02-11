@@ -214,9 +214,9 @@ class MohoRenderer:
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
             )
 
-            # Monitor log file for progress if verbose
+            # Monitor log file for progress only (no display - StreamReader handles that)
             if log_path:
-                monitor = LogMonitor(log_path, on_output, on_progress, job_id=job.id)
+                monitor = LogMonitor(log_path, None, on_progress, job_id=job.id)
                 monitor.start()
 
             # Read stdout/stderr line-by-line in threads for real-time output
@@ -332,7 +332,11 @@ def _copy_images_to_root(job: RenderJob, on_output=None):
 
 
 class _StreamReader:
-    """Reads a subprocess stream line-by-line in a background thread."""
+    """Reads a subprocess stream line-by-line in a background thread.
+
+    For stdout: filters out individual Frame lines (they arrive buffered from
+    Moho all at once) and emits a clean summary when 'Done!' is seen.
+    """
 
     def __init__(self, stream, on_output=None, on_progress=None,
                  job_id="", is_stderr=False):
@@ -344,6 +348,10 @@ class _StreamReader:
         self._thread = None
         self._output_lines = []
         self._last_progress = -1.0
+        # Frame stats for summary
+        self._frame_count = 0
+        self._total_frames = 0
+        self._last_secs_per_frame = 0.0
 
     def start(self):
         self._thread = threading.Thread(target=self._read, daemon=True)
@@ -365,11 +373,57 @@ class _StreamReader:
                 if self._is_stderr:
                     self._output_lines.append(line)
                     continue
-                # stdout: emit as log and parse progress
+
+                stripped = line.strip()
+
+                # Frame lines: parse for progress but don't emit individually
+                # (Moho buffers these and dumps them all at once when render ends)
+                if stripped.startswith("Frame "):
+                    self._parse_progress(line)
+                    self._parse_frame_stats(stripped)
+                    continue
+
+                # Skip Moho internal debug lines (FreeImage, LM system)
+                if stripped in ("InitLMSystem", "LM_Main") or "FreeImage" in stripped:
+                    continue
+
+                # "Done!" signals render complete - emit a summary before it
+                if stripped == "Done!":
+                    if self._on_output and self._total_frames > 0:
+                        self._on_output(
+                            f"[{self._job_id}] Rendered {self._frame_count}/{self._total_frames} frames"
+                            f" ({self._last_secs_per_frame:.2f} secs/frame)"
+                        )
+
+                # Emit all other lines normally (project info, settings, Done!, etc.)
                 if self._on_output:
                     self._on_output(f"[{self._job_id}] {line}")
                 self._parse_progress(line)
         except (IOError, OSError, ValueError):
+            pass
+
+    def _parse_frame_stats(self, stripped):
+        """Extract stats from: 'Frame N (current/total)\tX.XX secs/frame\tY.YY secs remaining'"""
+        try:
+            paren_start = stripped.index("(")
+            paren_end = stripped.index(")")
+            fraction = stripped[paren_start + 1:paren_end]
+            parts = fraction.split("/")
+            if len(parts) == 2:
+                current = int(parts[0])
+                total = int(parts[1])
+                self._frame_count = max(self._frame_count, current)
+                self._total_frames = total
+                rest = stripped[paren_end + 1:].strip()
+                if "secs/frame" in rest:
+                    for part in rest.split("\t"):
+                        part = part.strip()
+                        if "secs/frame" in part:
+                            try:
+                                self._last_secs_per_frame = float(part.split()[0])
+                            except (ValueError, IndexError):
+                                pass
+        except (ValueError, IndexError):
             pass
 
     def _parse_progress(self, line):
@@ -418,6 +472,7 @@ class _HeartbeatThread:
         self._output_detected = False
         self._last_file_size = 0
         self._frame_count = 0
+        self._first_detected_time = None
         self._is_image_format = job.format in self.IMAGE_FORMATS
         self._output_file, self._output_dir, self._output_stem, self._output_ext = \
             self._resolve_output_paths()
@@ -459,34 +514,89 @@ class _HeartbeatThread:
             pass
 
     def _check_image_files(self):
-        """Count rendered frame files for image sequences."""
+        """Count rendered frame files for image sequences.
+
+        Checks both the output directory and subdirectories (for AllComps
+        with createfolderforlayercomps, each comp gets its own subfolder).
+        """
         if not self._output_dir.exists():
             return
-        prefix = self._output_stem + "_"
         ext = self._output_ext
-        count = sum(1 for f in self._output_dir.iterdir()
-                    if f.name.startswith(prefix) and f.suffix.lower() == ext)
+
+        # Collect directories to check: output dir + any subdirectories
+        dirs_to_check = [self._output_dir]
+        try:
+            dirs_to_check.extend(d for d in self._output_dir.iterdir() if d.is_dir())
+        except OSError:
+            pass
+
+        count = 0
+        max_frame_num = 0
+        dirs_with_files = 0
+
+        for dirpath in dirs_to_check:
+            dir_has_files = False
+            try:
+                for f in dirpath.iterdir():
+                    if not f.is_file() or f.suffix.lower() != ext:
+                        continue
+                    # Extract frame number from name_NNNNN.ext
+                    parts = f.stem.rsplit("_", 1)
+                    if len(parts) == 2:
+                        try:
+                            frame_num = int(parts[1])
+                            count += 1
+                            max_frame_num = max(max_frame_num, frame_num)
+                            dir_has_files = True
+                        except ValueError:
+                            pass
+            except OSError:
+                pass
+            if dir_has_files:
+                dirs_with_files += 1
+
         if count > self._frame_count:
             self._frame_count = count
             self._output_detected = True
-            # Calculate progress if we know total frames
+
+            # Calculate progress
             total = None
             if self._job.start_frame is not None and self._job.end_frame is not None:
-                total = self._job.end_frame - self._job.start_frame + 1
+                frames_per_comp = self._job.end_frame - self._job.start_frame + 1
+                total = frames_per_comp * max(dirs_with_files, 1)
+            elif max_frame_num > 0:
+                # Estimate: max frame number seen × number of directories
+                total = max_frame_num * max(dirs_with_files, 1)
+
             if total and total > 0:
-                progress = (count / total) * 100.0
+                progress = min((count / total) * 100.0, 99.0)
                 self._job.progress = progress
                 if self._on_progress:
                     self._on_progress(progress)
 
     def _check_video_file(self):
-        """Check if video output file exists and is growing."""
+        """Check if video output file exists and is growing.
+
+        Since we can't know the final file size, uses a time-based
+        asymptotic curve to estimate progress (caps at 90%).
+        """
         if not self._output_file.exists():
             return
         size = self._output_file.stat().st_size
-        if size > 0 and size != self._last_file_size:
-            self._last_file_size = size
-            self._output_detected = True
+        if size > 0:
+            if size != self._last_file_size:
+                self._last_file_size = size
+                if not self._output_detected:
+                    self._first_detected_time = time.time()
+                self._output_detected = True
+            # Time-based progress estimate when output is actively growing
+            if self._output_detected and self._first_detected_time:
+                elapsed = time.time() - self._first_detected_time
+                # Asymptotic: ~30% at 60s, ~45% at 120s, ~64% at 300s, ~75% at 360s
+                progress = min(90.0, 90.0 * elapsed / (elapsed + 120.0))
+                self._job.progress = progress
+                if self._on_progress:
+                    self._on_progress(progress)
 
     def _run(self):
         prev_progress = 0.0
@@ -527,7 +637,13 @@ class _HeartbeatThread:
                         self._on_output(f"[{self._job.id}] Rendering... {self._frame_count} frames written - Elapsed: {elapsed_str}")
                     else:
                         size_mb = self._last_file_size / (1024 * 1024)
-                        self._on_output(f"[{self._job.id}] Rendering... (output: {size_mb:.1f} MB) - Elapsed: {elapsed_str}")
+                        rate_str = ""
+                        if self._first_detected_time:
+                            dt = time.time() - self._first_detected_time
+                            if dt > 1:
+                                rate_mb = size_mb / dt
+                                rate_str = f" ({rate_mb:.1f} MB/s)"
+                        self._on_output(f"[{self._job.id}] Rendering... {size_mb:.1f} MB{rate_str} - Elapsed: {elapsed_str}")
                 else:
                     self._on_output(f"[{self._job.id}] Loading project... Elapsed: {elapsed_str}")
 

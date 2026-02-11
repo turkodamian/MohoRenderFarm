@@ -8,15 +8,39 @@ render farm, and full CLI automation.
 """
 import sys
 import os
+import socket
+import json
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from src.config import AppConfig
 
+IPC_PORT = 51780
+IPC_HOST = '127.0.0.1'
+
+
+def _try_send_to_running(files):
+    """Try to send files to an already running instance. Returns True if successful."""
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(2)
+        sock.connect((IPC_HOST, IPC_PORT))
+        data = json.dumps({"files": [os.path.abspath(f) for f in files]}).encode('utf-8')
+        sock.sendall(data)
+        sock.close()
+        return True
+    except (ConnectionRefusedError, socket.timeout, OSError):
+        return False
+
 
 def run_gui(initial_files=None, add_to_queue_files=None):
     """Launch the GUI application."""
+    # Single-instance: try sending files to already running instance
+    if add_to_queue_files:
+        if _try_send_to_running(add_to_queue_files):
+            return  # Sent to running instance, exit
+
     from PyQt6.QtWidgets import QApplication
     from src.gui.main_window import MainWindow
     from src.gui.styles import DARK_THEME

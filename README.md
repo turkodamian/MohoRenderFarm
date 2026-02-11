@@ -380,6 +380,14 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 
 ## Changelog
 
+### v1.2.1
+- **Single-Instance IPC** - Context menu "Add to Queue" now adds to the existing running instance instead of opening a new window
+- **Gradual Progress for PNG AllComps** - Progress column now counts frame files across subdirectories for accurate real-time progress
+- **Gradual Progress for MP4** - Progress column shows a time-based estimate instead of staying at 0% until render completes
+- **Cleaner Log Output** - Filtered out Moho internal debug lines (FreeImage, InitLMSystem) from the output log
+- **Delete Key Fix** - Fixed keyboard shortcut for removing selected jobs from the render queue
+- **Layer Comp Defaults** - "Add layer comp suffix", "Create folder for each layer comp", and "Auto-compose" are now checked by default
+
 ### v1.2.0
 - **Checkbox X Indicator** - Active checkboxes now display a visible X mark for better visual feedback
 - **Render AllComps Checkbox** - Dedicated checkbox in Layer Compositions to quickly render all layer comps

@@ -1,6 +1,8 @@
 """Main application window for Moho Render Farm."""
 import os
 import sys
+import socket
+import threading
 from datetime import datetime
 from pathlib import Path
 from PyQt6.QtWidgets import (
@@ -185,7 +187,9 @@ class EditSettingsDialog(QDialog):
         lc_layout.addRow("", lc_row)
 
         self.chk_addlayercompsuffix = QCheckBox("Add layer comp suffix to filename")
+        self.chk_addlayercompsuffix.setChecked(True)
         self.chk_createfolderforlayercomp = QCheckBox("Create folder for each layer comp")
+        self.chk_createfolderforlayercomp.setChecked(True)
         self.chk_addformatsuffix = QCheckBox("Add format suffix to filename")
 
         lc_opts = QHBoxLayout()
@@ -195,6 +199,7 @@ class EditSettingsDialog(QDialog):
         lc_layout.addRow("Options:", lc_opts)
 
         self.chk_compose_layers = QCheckBox("Auto-compose all layer comps into MP4 with ffmpeg")
+        self.chk_compose_layers.setChecked(True)
         lc_layout.addRow("", self.chk_compose_layers)
 
         self.lc_group.setEnabled(False)
@@ -526,6 +531,7 @@ class MainWindow(QMainWindow):
     queue_changed_signal = pyqtSignal()
     progress_signal = pyqtSignal(str, float)  # job_id, progress
     job_status_signal = pyqtSignal(str, str)  # job_id, status
+    ipc_files_signal = pyqtSignal(list)  # files from another instance
 
     def __init__(self, config: AppConfig, initial_files=None, add_to_queue_files=None):
         super().__init__()
@@ -549,6 +555,7 @@ class MainWindow(QMainWindow):
         self._connect_signals()
         self._setup_menu()
         self.setAcceptDrops(True)
+        self._start_ipc_server()
 
         # Load default preset if configured
         default_preset = self.config.get("default_preset", "")
@@ -847,7 +854,9 @@ class MainWindow(QMainWindow):
         lc_layout.addRow("", lc_row)
 
         self.chk_addlayercompsuffix = QCheckBox("Add layer comp suffix to filename")
+        self.chk_addlayercompsuffix.setChecked(True)
         self.chk_createfolderforlayercomp = QCheckBox("Create folder for each layer comp")
+        self.chk_createfolderforlayercomp.setChecked(True)
         self.chk_addformatsuffix = QCheckBox("Add format suffix to filename")
 
         lc_opts = QHBoxLayout()
@@ -857,6 +866,7 @@ class MainWindow(QMainWindow):
         lc_layout.addRow("Options:", lc_opts)
 
         self.chk_compose_layers = QCheckBox("Auto-compose all layer comps into MP4 with ffmpeg")
+        self.chk_compose_layers.setChecked(True)
         lc_layout.addRow("", self.chk_compose_layers)
 
         layout.addWidget(lc_group)
@@ -1017,6 +1027,7 @@ class MainWindow(QMainWindow):
         self.queue_changed_signal.connect(self._refresh_queue_table)
         self.progress_signal.connect(self._update_job_progress)
         self.job_status_signal.connect(self._update_job_status)
+        self.ipc_files_signal.connect(self._on_ipc_files)
 
         # Queue controls
         self.btn_add_files.clicked.connect(self._add_files)
@@ -1040,8 +1051,7 @@ class MainWindow(QMainWindow):
         self.btn_register_ctx.clicked.connect(self._register_context_menu)
         self.btn_unregister_ctx.clicked.connect(self._unregister_context_menu)
 
-        # Keyboard shortcuts
-        QShortcut(QKeySequence(Qt.Key.Key_Delete), self, self._delete_selected_jobs)
+        # Keyboard shortcuts (Delete is handled by QAction in menu to avoid ambiguity)
         QShortcut(QKeySequence(Qt.Key.Key_Escape), self, self._stop_queue)
 
     def _setup_menu(self):
@@ -1155,13 +1165,11 @@ class MainWindow(QMainWindow):
             status_item.setForeground(QColor(color_map.get(job.status, "#cdd6f4")))
             self.queue_table.setItem(row, 0, status_item)
 
-            # Project (clickable)
+            # Project
             proj_item = QTableWidgetItem(job.project_name)
+            self.queue_table.setItem(row, 1, proj_item)
             link_font = QFont()
             link_font.setUnderline(True)
-            proj_item.setFont(link_font)
-            proj_item.setForeground(QColor("#89b4fa"))
-            self.queue_table.setItem(row, 1, proj_item)
             # Format
             self.queue_table.setItem(row, 2, QTableWidgetItem(f"{job.format}"))
             # Layer Comp
@@ -1444,13 +1452,11 @@ class MainWindow(QMainWindow):
         menu.exec(self.queue_table.viewport().mapToGlobal(pos))
 
     def _on_queue_cell_clicked(self, row, col):
-        """Handle clicks on Project (col 1) and Output (col 4) to open Explorer."""
+        """Handle clicks on Output (col 4) to open Explorer."""
         if row < 0 or row >= len(self.queue.jobs):
             return
         job = self.queue.jobs[row]
-        if col == 1:
-            self._open_in_explorer(job.project_file)
-        elif col == 4:
+        if col == 4:
             path = job.output_path
             if path:
                 # For file paths, select the file; for dirs, open the dir
@@ -1847,6 +1853,71 @@ class MainWindow(QMainWindow):
                 self.queue_table.setItem(row, 6, QTableWidgetItem(current.elapsed_str))
                 break
 
+    # --- Single-instance IPC server ---
+    def _start_ipc_server(self):
+        """Start a TCP server to receive files from other app instances."""
+        self._ipc_running = True
+        self._ipc_socket = None
+        try:
+            self._ipc_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self._ipc_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self._ipc_socket.bind(('127.0.0.1', 51780))
+            self._ipc_socket.listen(5)
+            self._ipc_socket.settimeout(1.0)
+            self._ipc_thread = threading.Thread(target=self._ipc_listen, daemon=True)
+            self._ipc_thread.start()
+        except OSError:
+            # Port unavailable - silently continue without IPC
+            if self._ipc_socket:
+                try:
+                    self._ipc_socket.close()
+                except OSError:
+                    pass
+                self._ipc_socket = None
+
+    def _ipc_listen(self):
+        """Background thread: accept connections and receive file paths."""
+        while self._ipc_running and self._ipc_socket:
+            try:
+                conn, addr = self._ipc_socket.accept()
+                data = b""
+                conn.settimeout(5)
+                while True:
+                    chunk = conn.recv(4096)
+                    if not chunk:
+                        break
+                    data += chunk
+                conn.close()
+                if data:
+                    msg = json.loads(data.decode('utf-8'))
+                    files = msg.get("files", [])
+                    if files:
+                        self.ipc_files_signal.emit(files)
+            except socket.timeout:
+                continue
+            except (OSError, json.JSONDecodeError):
+                break
+
+    def _on_ipc_files(self, files):
+        """Handle files received from another instance via IPC."""
+        for f in files:
+            if os.path.exists(f):
+                self._add_file_to_queue(f)
+        # Bring window to front
+        self.showNormal()
+        self.activateWindow()
+        self.raise_()
+
+    def _stop_ipc_server(self):
+        """Stop the IPC server."""
+        self._ipc_running = False
+        if self._ipc_socket:
+            try:
+                self._ipc_socket.close()
+            except OSError:
+                pass
+            self._ipc_socket = None
+
     def closeEvent(self, event):
         if self.queue.is_running:
             reply = QMessageBox.question(
@@ -1865,6 +1936,7 @@ class MainWindow(QMainWindow):
             self.slave_client.stop()
 
         self._close_log_file()
+        self._stop_ipc_server()
 
         # Save moho path if changed
         self.config.moho_path = self.edit_moho_path.text()
