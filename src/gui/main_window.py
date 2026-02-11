@@ -545,6 +545,9 @@ class MainWindow(QMainWindow):
         return widget
 
     def _create_settings_tab(self):
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
@@ -713,7 +716,8 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(qt_group)
         layout.addStretch()
-        return widget
+        scroll.setWidget(widget)
+        return scroll
 
     def _create_farm_tab(self):
         widget = QWidget()
