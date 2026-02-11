@@ -225,8 +225,8 @@ class MohoRenderer:
             stdout_reader.start()
             stderr_reader.start()
 
-            # Start heartbeat thread for periodic status updates
-            heartbeat = _HeartbeatThread(job, on_output, interval=10)
+            # Start heartbeat thread for periodic status updates + file monitoring
+            heartbeat = _HeartbeatThread(job, on_output, on_progress, interval=5)
             heartbeat.start()
 
             # Wait for process to complete (non-blocking reads happening in threads)
@@ -393,16 +393,50 @@ class _StreamReader:
 
 
 class _HeartbeatThread:
-    """Emits periodic status messages while a render is in progress."""
+    """Emits periodic status messages and monitors output files for progress."""
+
+    IMAGE_FORMATS = {"JPEG", "PNG", "TGA", "BMP", "PSD"}
+    EXT_MAP = {
+        "JPEG": ".jpg", "PNG": ".png", "TGA": ".tga",
+        "BMP": ".bmp", "PSD": ".psd", "MP4": ".mp4",
+        "QT": ".mov", "Animated GIF": ".gif",
+        "M4V": ".m4v", "AVI": ".avi", "ASF": ".asf",
+        "MOV": ".mov", "GIF": ".gif",
+    }
 
     def __init__(self, job: RenderJob,
                  on_output: Optional[Callable[[str], None]] = None,
-                 interval: float = 10):
+                 on_progress: Optional[Callable[[float], None]] = None,
+                 interval: float = 5):
         self._job = job
         self._on_output = on_output
+        self._on_progress = on_progress
         self._interval = interval
         self._running = False
         self._thread = None
+        # File monitoring state
+        self._output_detected = False
+        self._last_file_size = 0
+        self._frame_count = 0
+        self._is_image_format = job.format in self.IMAGE_FORMATS
+        self._output_file, self._output_dir, self._output_stem, self._output_ext = \
+            self._resolve_output_paths()
+
+    def _resolve_output_paths(self):
+        """Determine output file/directory/stem/ext to monitor."""
+        job = self._job
+        ext = self.EXT_MAP.get(job.format, ".mp4")
+        if job.output_path:
+            p = Path(job.output_path)
+            if p.suffix:
+                return p, p.parent, p.stem, p.suffix.lower()
+            else:
+                stem = Path(job.project_file).stem
+                return p / (stem + ext), p, stem, ext
+        else:
+            stem = Path(job.project_file).stem
+            d = Path(job.project_file).parent
+            return d / (stem + ext), d, stem, ext
 
     def start(self):
         self._running = True
@@ -414,6 +448,46 @@ class _HeartbeatThread:
         if self._thread:
             self._thread.join(timeout=2)
 
+    def _check_files(self):
+        """Check output files on disk for render activity."""
+        try:
+            if self._is_image_format:
+                self._check_image_files()
+            else:
+                self._check_video_file()
+        except (IOError, OSError):
+            pass
+
+    def _check_image_files(self):
+        """Count rendered frame files for image sequences."""
+        if not self._output_dir.exists():
+            return
+        prefix = self._output_stem + "_"
+        ext = self._output_ext
+        count = sum(1 for f in self._output_dir.iterdir()
+                    if f.name.startswith(prefix) and f.suffix.lower() == ext)
+        if count > self._frame_count:
+            self._frame_count = count
+            self._output_detected = True
+            # Calculate progress if we know total frames
+            total = None
+            if self._job.start_frame is not None and self._job.end_frame is not None:
+                total = self._job.end_frame - self._job.start_frame + 1
+            if total and total > 0:
+                progress = (count / total) * 100.0
+                self._job.progress = progress
+                if self._on_progress:
+                    self._on_progress(progress)
+
+    def _check_video_file(self):
+        """Check if video output file exists and is growing."""
+        if not self._output_file.exists():
+            return
+        size = self._output_file.stat().st_size
+        if size > 0 and size != self._last_file_size:
+            self._last_file_size = size
+            self._output_detected = True
+
     def _run(self):
         prev_progress = 0.0
         stale_cycles = 0
@@ -423,6 +497,10 @@ class _HeartbeatThread:
             time.sleep(self._interval)
             if not self._running:
                 break
+
+            # Check output files for activity
+            self._check_files()
+
             elapsed = time.time() - (self._job.start_time or time.time())
             elapsed_str = _format_elapsed(elapsed)
             progress = self._job.progress
@@ -438,14 +516,20 @@ class _HeartbeatThread:
             prev_progress = progress
 
             if self._on_output:
-                if not ever_had_progress:
-                    self._on_output(f"[{self._job.id}] Loading project... Elapsed: {elapsed_str}")
-                elif stale_cycles >= 2:
-                    self._on_output(f"[{self._job.id}] Processing additional layer comps... Elapsed: {elapsed_str}")
-                elif progress > 0:
-                    self._on_output(f"[{self._job.id}] Rendering... {progress:.0f}% - Elapsed: {elapsed_str}")
+                if ever_had_progress:
+                    if stale_cycles >= 2:
+                        self._on_output(f"[{self._job.id}] Processing additional layer comps... Elapsed: {elapsed_str}")
+                    else:
+                        self._on_output(f"[{self._job.id}] Rendering... {progress:.0f}% - Elapsed: {elapsed_str}")
+                elif self._output_detected:
+                    # Output file detected = rendering has started
+                    if self._is_image_format and self._frame_count > 0:
+                        self._on_output(f"[{self._job.id}] Rendering... {self._frame_count} frames written - Elapsed: {elapsed_str}")
+                    else:
+                        size_mb = self._last_file_size / (1024 * 1024)
+                        self._on_output(f"[{self._job.id}] Rendering... (output: {size_mb:.1f} MB) - Elapsed: {elapsed_str}")
                 else:
-                    self._on_output(f"[{self._job.id}] Processing next layer comp... Elapsed: {elapsed_str}")
+                    self._on_output(f"[{self._job.id}] Loading project... Elapsed: {elapsed_str}")
 
 
 class LogMonitor:
