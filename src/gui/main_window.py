@@ -792,7 +792,8 @@ class MainWindow(QMainWindow):
 
         self.edit_output_dir = QLineEdit()
         self.edit_output_dir.setPlaceholderText("Same folder as project file (default)")
-        self.edit_output_dir.setText(self.config.get("default_output_dir", ""))
+        default_dir = self.config.get("default_output_dir", "") if self.config.get("default_output_mode", "project") == "custom" else ""
+        self.edit_output_dir.setText(default_dir)
         browse_out = QPushButton("Browse...")
         browse_out.setFixedWidth(80)
         browse_out.clicked.connect(self._browse_output_dir)
@@ -1084,6 +1085,33 @@ class MainWindow(QMainWindow):
         moho_layout.addRow("Moho.exe Path:", moho_row)
 
         layout.addWidget(moho_group)
+
+        # Default output folder
+        output_group = QGroupBox("Default Output Folder")
+        output_layout = QFormLayout(output_group)
+
+        self.edit_default_output = QLineEdit()
+        self.edit_default_output.setText(self.config.get("default_output_dir", ""))
+        self.edit_default_output.setPlaceholderText("No custom folder set")
+        browse_output = QPushButton("Browse...")
+        browse_output.setFixedWidth(80)
+        browse_output.clicked.connect(self._browse_default_output)
+        output_row = QHBoxLayout()
+        output_row.addWidget(self.edit_default_output)
+        output_row.addWidget(browse_output)
+        output_layout.addRow("Folder:", output_row)
+
+        self.combo_default_output_mode = QComboBox()
+        self.combo_default_output_mode.addItem("Project folder (same folder as .moho file)")
+        self.combo_default_output_mode.addItem("Custom folder (set above)")
+        current_mode = self.config.get("default_output_mode", "project")
+        self.combo_default_output_mode.setCurrentIndex(1 if current_mode == "custom" else 0)
+        self.combo_default_output_mode.currentIndexChanged.connect(self._on_default_output_mode_changed)
+        output_layout.addRow("Default:", self.combo_default_output_mode)
+
+        self.edit_default_output.textChanged.connect(self._on_default_output_dir_changed)
+
+        layout.addWidget(output_group)
 
         # Context menu
         ctx_group = QGroupBox("Windows Integration")
@@ -1723,6 +1751,27 @@ class MainWindow(QMainWindow):
         if filepath:
             self.edit_moho_path.setText(filepath)
             self.config.moho_path = filepath
+
+    def _browse_default_output(self):
+        folder = QFileDialog.getExistingDirectory(self, "Select Default Output Folder")
+        if folder:
+            self.edit_default_output.setText(folder)
+
+    def _on_default_output_dir_changed(self, text):
+        self.config.set("default_output_dir", text)
+        # Sync to Render Settings output field if custom mode is active
+        if self.combo_default_output_mode.currentIndex() == 1 and text:
+            self.edit_output_dir.setText(text)
+
+    def _on_default_output_mode_changed(self, index):
+        mode = "custom" if index == 1 else "project"
+        self.config.set("default_output_mode", mode)
+        if mode == "custom":
+            custom_dir = self.edit_default_output.text()
+            if custom_dir:
+                self.edit_output_dir.setText(custom_dir)
+        else:
+            self.edit_output_dir.setText("")
 
     # --- Context menu registration ---
     def _register_context_menu(self):

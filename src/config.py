@@ -16,6 +16,7 @@ PRESETS_DIR = CONFIG_DIR / "presets"
 DEFAULT_CONFIG = {
     "moho_path": DEFAULT_MOHO_PATH,
     "default_output_dir": "",
+    "default_output_mode": "project",
     "default_format": "MP4",
     "default_options": "MP4 (MPEG4-AAC)",
     "default_multithread": True,
