@@ -8,8 +8,9 @@ Created by **Damian Turkieh**
 
 ## Features
 
-- **Batch Rendering** - Queue multiple Moho projects and render them sequentially
+- **Batch Rendering** - Queue multiple Moho projects with concurrent rendering support
 - **Render Farm** - Master/Slave network system for distributed rendering across multiple PCs
+- **Concurrent Rendering** - Configurable max simultaneous renders (local queue and slave mode)
 - **Full GUI** - Dark-themed PyQt6 interface with drag-and-drop support
 - **CLI Automation** - Complete command-line interface for scripting and pipelines
 - **All Moho Render Options** - Format, codec, frame range, layer comps, antialiasing, multithreading, and more
@@ -112,6 +113,7 @@ Save and load your render settings as named presets. Set a default preset that l
 | Extra-smooth | Extra image quality | No |
 | Premultiply Alpha | Premultiply alpha channel | Yes |
 | NTSC Safe Colors | Clamp to NTSC-safe range | No |
+| Max Simultaneous Renders | Number of jobs to render concurrently (1-16) | 1 |
 | Copy Images | Copy `\Images` folder to project root (fix offline media) | No |
 | Render AllComps | Checkbox to render all layer comps at once | No |
 | Custom Layer Comp | Specific layer comp name or AllLayerComps | None |
@@ -125,12 +127,19 @@ Save and load your render settings as named presets. Set a default preset that l
 ### Render Farm Tab
 Set up distributed rendering across multiple PCs:
 
-1. **Master PC**: Click "Start as Master" - it will listen for slave connections
-2. **Slave PCs**: Enter the master's IP and port, click "Start as Slave"
-3. Add jobs to the queue on the master - they'll be distributed to idle slaves
+1. **Master PC**: Click "Start Master" - it will listen for slave connections
+2. **Slave PCs**: Enter the master's IP and port, click "Start Slave"
+3. Add jobs to the local queue, then use **Send to Farm** / **Send All to Farm** to push them to the farm queue
+4. Slaves automatically pull and render jobs from the farm queue
+5. **Auto-send** checkbox: new queue jobs go directly to the farm when master is running
+6. **Manual assignment**: Right-click a slave to assign a specific job, or right-click a farm job to assign it to a specific slave
+7. **Farm Job Queue table**: Shows all farm jobs with color-coded status (pending/reserved/rendering/completed/failed)
+8. **Connected Slaves table**: Color-coded status (green=idle, blue=rendering, red=offline)
+9. **Farm Log**: Timestamped log of all farm operations with `[MASTER]`/`[SLAVE]`/`[GUI]` prefixes
 
 ### App Settings Tab
 - **Moho.exe Path** - Configure the path to Moho.exe (default: `C:\Program Files\Moho 14\Moho.exe`)
+- **Max Simultaneous Renders** - Number of concurrent renders (1-16), applies to both local queue and slave mode
 - **Windows Integration** - Register/unregister right-click context menu for .moho files
 
 ---
@@ -330,8 +339,7 @@ MohoRenderFarm/
 ├── setup_ffmpeg.py         # FFmpeg auto-downloader
 ├── ffmpeg/                 # FFmpeg binaries (auto-downloaded)
 │   ├── ffmpeg.exe          # FFmpeg encoder
-│   ├── ffprobe.exe         # FFmpeg probe
-│   └── *.dll               # FFmpeg libraries
+│   └── ffprobe.exe         # FFmpeg probe
 ├── src/
 │   ├── config.py           # App configuration
 │   ├── moho_renderer.py    # Moho CLI wrapper engine
@@ -379,6 +387,14 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 ---
 
 ## Changelog
+
+### v1.3.0
+- **Concurrent Rendering** - Configurable "Max simultaneous renders" (1-16) in Render Settings, allows rendering multiple jobs at the same time for both local queue and slave mode
+- **Render Farm Management** - Complete farm GUI: Send to Farm / Send All to Farm buttons, auto-send checkbox, farm job queue table with color-coded status, connected slaves table with color-coded status
+- **Manual Job Assignment** - Right-click slaves or farm jobs to manually assign jobs to specific machines
+- **Farm Job Queue** - Full farm queue display with pending/reserved/rendering/completed/failed status, context menu for cancel/return to local queue/clear completed
+- **Farm Log** - Dedicated timestamped farm log with `[MASTER]`/`[SLAVE]`/`[GUI]` prefixes for all farm operations
+- **FFmpeg Public Download** - FFmpeg now downloads from public BtbN builds (no private repo dependency)
 
 ### v1.2.2
 - **CPU Monitor** - Real-time CPU usage bar in the header, updated every second via Windows API (no extra dependencies)

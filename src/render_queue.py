@@ -3,22 +3,25 @@ import json
 import threading
 import time
 from pathlib import Path
-from typing import Optional, Callable, List
+from typing import Optional, Callable, List, Dict, Tuple
 from src.moho_renderer import RenderJob, RenderStatus, MohoRenderer
 
 
 class RenderQueue:
-    """Manages a queue of render jobs with sequential execution."""
+    """Manages a queue of render jobs with concurrent execution."""
 
-    def __init__(self, moho_path: str):
+    def __init__(self, moho_path: str, max_concurrent: int = 1):
         self.jobs: List[RenderJob] = []
         self.moho_path = moho_path
-        self._renderer: Optional[MohoRenderer] = None
+        self._max_concurrent = max(1, max_concurrent)
         self._running = False
-        self._thread: Optional[threading.Thread] = None
-        self._current_job: Optional[RenderJob] = None
         self._paused = False
         self._lock = threading.Lock()
+
+        # Multi-worker state
+        self._workers: List[threading.Thread] = []
+        self._active_renders: Dict[int, Tuple[MohoRenderer, RenderJob]] = {}
+        self._workers_done = 0
 
         # Callbacks
         self.on_job_started: Optional[Callable[[RenderJob], None]] = None
@@ -28,6 +31,14 @@ class RenderQueue:
         self.on_output: Optional[Callable[[str], None]] = None
         self.on_progress: Optional[Callable[[RenderJob, float], None]] = None
         self.on_queue_changed: Optional[Callable[[], None]] = None
+
+    @property
+    def max_concurrent(self):
+        return self._max_concurrent
+
+    @max_concurrent.setter
+    def max_concurrent(self, value: int):
+        self._max_concurrent = max(1, value)
 
     def add_job(self, job: RenderJob) -> RenderJob:
         """Add a job to the queue."""
@@ -90,25 +101,31 @@ class RenderQueue:
         return [j for j in self.jobs if j.status == RenderStatus.PENDING.value]
 
     def start(self):
-        """Start processing the queue."""
+        """Start processing the queue with concurrent workers."""
         if self._running:
             return
         self._running = True
         self._paused = False
-        self._thread = threading.Thread(target=self._process_queue, daemon=True)
-        self._thread.start()
+        self._workers_done = 0
+        self._workers = []
+        for i in range(self._max_concurrent):
+            t = threading.Thread(target=self._worker_func, args=(i,), daemon=True)
+            self._workers.append(t)
+            t.start()
 
     def stop(self):
-        """Stop processing and cancel current render."""
+        """Stop processing and cancel all active renders."""
         self._running = False
         self._paused = False
-        if self._renderer:
-            self._renderer.cancel()
-        if self._thread:
-            self._thread.join(timeout=10)
+        with self._lock:
+            for renderer, _ in self._active_renders.values():
+                renderer.cancel()
+        for t in self._workers:
+            t.join(timeout=10)
+        self._workers = []
 
     def pause(self):
-        """Pause queue processing (finishes current job)."""
+        """Pause queue processing (finishes current jobs)."""
         self._paused = True
 
     def resume(self):
@@ -118,9 +135,10 @@ class RenderQueue:
             self.start()
 
     def cancel_current(self):
-        """Cancel only the current rendering job."""
-        if self._renderer and self._current_job:
-            self._renderer.cancel()
+        """Cancel all currently rendering jobs."""
+        with self._lock:
+            for renderer, _ in list(self._active_renders.values()):
+                renderer.cancel()
 
     @property
     def is_running(self):
@@ -131,8 +149,19 @@ class RenderQueue:
         return self._paused
 
     @property
-    def current_job(self):
-        return self._current_job
+    def current_jobs(self) -> List[RenderJob]:
+        """Return list of all currently rendering jobs."""
+        with self._lock:
+            return [job for _, job in self._active_renders.values()]
+
+    @property
+    def current_job(self) -> Optional[RenderJob]:
+        """Return the first currently rendering job (backward compat)."""
+        with self._lock:
+            if self._active_renders:
+                _, job = next(iter(self._active_renders.values()))
+                return job
+        return None
 
     @property
     def total_jobs(self):
@@ -150,46 +179,49 @@ class RenderQueue:
     def failed_count(self):
         return len([j for j in self.jobs if j.status == RenderStatus.FAILED.value])
 
-    def _process_queue(self):
-        """Process jobs in the queue sequentially."""
-        self._renderer = MohoRenderer(self.moho_path)
-
+    def _worker_func(self, worker_id: int):
+        """Worker thread: grab pending jobs and render them."""
         while self._running:
             if self._paused:
                 time.sleep(0.5)
                 continue
 
+            # Find next pending job
             next_job = None
             with self._lock:
                 for job in self.jobs:
                     if job.status == RenderStatus.PENDING.value:
                         next_job = job
+                        # Mark as rendering immediately to prevent other workers from grabbing it
+                        next_job.status = RenderStatus.RENDERING.value
                         break
 
             if next_job is None:
-                self._running = False
-                if self.on_queue_completed:
-                    self.on_queue_completed()
+                # No pending jobs left, worker exits
                 break
 
-            self._current_job = next_job
+            # Create renderer for this worker
+            renderer = MohoRenderer(self.moho_path)
+            with self._lock:
+                self._active_renders[worker_id] = (renderer, next_job)
 
             if self.on_job_started:
                 self.on_job_started(next_job)
 
-            def _on_progress(progress):
-                next_job.progress = progress
+            def _on_progress(progress, _job=next_job):
+                _job.progress = progress
                 if self.on_progress:
-                    self.on_progress(next_job, progress)
+                    self.on_progress(_job, progress)
 
-            self._renderer.render(
+            renderer.render(
                 next_job,
                 on_output=self.on_output,
                 on_complete=None,
                 on_progress=_on_progress,
             )
 
-            self._current_job = None
+            with self._lock:
+                self._active_renders.pop(worker_id, None)
 
             # Post-render: auto-compose layer comps with ffmpeg
             if (next_job.status == RenderStatus.COMPLETED.value
@@ -214,8 +246,19 @@ class RenderQueue:
             if self.on_queue_changed:
                 self.on_queue_changed()
 
-        self._renderer = None
-        self._current_job = None
+        # Worker exiting — check if all workers are done
+        all_done = False
+        with self._lock:
+            self._workers_done += 1
+            if self._workers_done >= len(self._workers):
+                # All workers finished
+                pending = any(j.status == RenderStatus.PENDING.value for j in self.jobs)
+                if not pending:
+                    self._running = False
+                    all_done = True
+
+        if all_done and self.on_queue_completed:
+            self.on_queue_completed()
 
     def save_queue(self, filepath: str):
         """Save the queue to a JSON file."""

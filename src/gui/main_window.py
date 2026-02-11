@@ -532,11 +532,13 @@ class MainWindow(QMainWindow):
     progress_signal = pyqtSignal(str, float)  # job_id, progress
     job_status_signal = pyqtSignal(str, str)  # job_id, status
     ipc_files_signal = pyqtSignal(list)  # files from another instance
+    farm_log_signal = pyqtSignal(str)  # farm-specific log messages
+    farm_queue_changed_signal = pyqtSignal()  # farm queue needs refresh
 
     def __init__(self, config: AppConfig, initial_files=None, add_to_queue_files=None):
         super().__init__()
         self.config = config
-        self.queue = RenderQueue(config.moho_path)
+        self.queue = RenderQueue(config.moho_path, max_concurrent=config.get("max_local_renders", 1))
 
         # Connect queue callbacks via signals for thread safety
         self.queue.on_output = self._emit_log
@@ -674,6 +676,15 @@ class MainWindow(QMainWindow):
         self.btn_clear_all = QPushButton("Clear All")
         controls.addWidget(self.btn_clear_completed)
         controls.addWidget(self.btn_clear_all)
+
+        controls.addSpacing(20)
+
+        self.btn_send_to_farm = QPushButton("Send to Farm")
+        self.btn_send_to_farm.setToolTip("Send selected pending jobs to the render farm")
+        self.btn_send_all_to_farm = QPushButton("Send All to Farm")
+        self.btn_send_all_to_farm.setToolTip("Send all pending jobs to the render farm")
+        controls.addWidget(self.btn_send_to_farm)
+        controls.addWidget(self.btn_send_all_to_farm)
 
         controls.addStretch()
 
@@ -851,6 +862,14 @@ class MainWindow(QMainWindow):
         self.chk_copy_images = QCheckBox("Copy \\Images to project root (fix offline media)")
         options_grid.addWidget(self.chk_copy_images, 4, 0, 1, 3)
 
+        options_grid.addWidget(QLabel("Max simultaneous renders:"), 5, 0)
+        self.spin_max_renders = QSpinBox()
+        self.spin_max_renders.setRange(1, 16)
+        self.spin_max_renders.setValue(self.config.get("max_local_renders", 1))
+        self.spin_max_renders.setToolTip("Number of jobs to render concurrently (local queue and slave mode)")
+        self.spin_max_renders.valueChanged.connect(self._on_max_renders_changed)
+        options_grid.addWidget(self.spin_max_renders, 5, 1)
+
         layout.addWidget(options_group)
 
         # Layer comps
@@ -947,6 +966,12 @@ class MainWindow(QMainWindow):
         self.spin_port.setValue(self.config.get("network_port", 5580))
         self.spin_port.setFixedWidth(100)
         conn_row.addWidget(self.spin_port)
+        conn_row.addSpacing(20)
+
+        self.chk_auto_send_farm = QCheckBox("Auto-send new queue jobs to farm")
+        self.chk_auto_send_farm.setToolTip("When enabled, jobs added to the local queue are automatically forwarded to the farm")
+        self.chk_auto_send_farm.setChecked(self.config.get("auto_send_to_farm", False))
+        conn_row.addWidget(self.chk_auto_send_farm)
         conn_row.addStretch()
 
         self.lbl_farm_status = QLabel("Status: Not started")
@@ -956,25 +981,71 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(mode_group)
 
-        # Connected slaves
-        slaves_group = QGroupBox("Connected Slaves")
-        slaves_layout = QVBoxLayout(slaves_group)
+        # Horizontal splitter: Slaves + Farm Queue
+        farm_splitter = QSplitter(Qt.Orientation.Horizontal)
 
+        # Left: Connected Slaves
+        slaves_widget = QWidget()
+        slaves_layout = QVBoxLayout(slaves_widget)
+        slaves_layout.setContentsMargins(0, 0, 0, 0)
+        slaves_layout.addWidget(QLabel("Connected Slaves"))
         self.slaves_table = QTableWidget()
         self.slaves_table.setColumnCount(6)
         self.slaves_table.setHorizontalHeaderLabels([
             "Hostname", "IP:Port", "Status", "Current Job", "Completed", "Failed"
         ])
         self.slaves_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.slaves_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.slaves_table.setAlternatingRowColors(True)
         self.slaves_table.verticalHeader().setVisible(False)
+        self.slaves_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.slaves_table.customContextMenuRequested.connect(self._show_slave_context_menu)
         slaves_layout.addWidget(self.slaves_table)
+        farm_splitter.addWidget(slaves_widget)
 
-        layout.addWidget(slaves_group)
+        # Right: Farm Queue
+        farm_queue_widget = QWidget()
+        farm_queue_layout = QVBoxLayout(farm_queue_widget)
+        farm_queue_layout.setContentsMargins(0, 0, 0, 0)
+        farm_queue_layout.addWidget(QLabel("Farm Job Queue"))
+        self.farm_queue_table = QTableWidget()
+        self.farm_queue_table.setColumnCount(7)
+        self.farm_queue_table.setHorizontalHeaderLabels([
+            "Status", "Project", "Format", "Assigned Slave", "Progress", "Time", "ID"
+        ])
+        self.farm_queue_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.farm_queue_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.farm_queue_table.setAlternatingRowColors(True)
+        self.farm_queue_table.verticalHeader().setVisible(False)
+        self.farm_queue_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.farm_queue_table.customContextMenuRequested.connect(self._show_farm_queue_context_menu)
+        farm_queue_layout.addWidget(self.farm_queue_table)
+        farm_splitter.addWidget(farm_queue_widget)
+
+        farm_splitter.setSizes([400, 600])
+        layout.addWidget(farm_splitter)
+
+        # Farm stats bar
+        stats_layout = QHBoxLayout()
+        self.lbl_farm_stats = QLabel("Farm: not running")
+        self.lbl_farm_stats.setStyleSheet("color: #a6adc8;")
+        stats_layout.addWidget(self.lbl_farm_stats)
+        stats_layout.addStretch()
+        self.lbl_farm_total_time = QLabel("")
+        self.lbl_farm_total_time.setStyleSheet("color: #a6adc8;")
+        stats_layout.addWidget(self.lbl_farm_total_time)
+        layout.addLayout(stats_layout)
 
         # Farm log
         farm_log_group = QGroupBox("Farm Log")
         farm_log_layout = QVBoxLayout(farm_log_group)
+        log_header = QHBoxLayout()
+        log_header.addStretch()
+        self.btn_clear_farm_log = QPushButton("Clear")
+        self.btn_clear_farm_log.setFixedWidth(60)
+        self.btn_clear_farm_log.clicked.connect(lambda: self.farm_log.clear())
+        log_header.addWidget(self.btn_clear_farm_log)
+        farm_log_layout.addLayout(log_header)
         self.farm_log = QTextEdit()
         self.farm_log.setReadOnly(True)
         farm_log_layout.addWidget(self.farm_log)
@@ -1043,6 +1114,8 @@ class MainWindow(QMainWindow):
         self.progress_signal.connect(self._update_job_progress)
         self.job_status_signal.connect(self._update_job_status)
         self.ipc_files_signal.connect(self._on_ipc_files)
+        self.farm_log_signal.connect(self._append_farm_log)
+        self.farm_queue_changed_signal.connect(self._refresh_farm_queue_table)
 
         # Queue controls
         self.btn_add_files.clicked.connect(self._add_files)
@@ -1055,6 +1128,8 @@ class MainWindow(QMainWindow):
         self.btn_save_queue.clicked.connect(self._save_queue)
         self.btn_load_queue.clicked.connect(self._load_queue)
         self.btn_clear_log.clicked.connect(self.log_output.clear)
+        self.btn_send_to_farm.clicked.connect(self._send_selected_to_farm)
+        self.btn_send_all_to_farm.clicked.connect(self._send_all_to_farm)
 
         # Farm
         self.btn_start_master.clicked.connect(self._start_master)
@@ -1163,6 +1238,14 @@ class MainWindow(QMainWindow):
             except (IOError, OSError):
                 pass
 
+    def _append_farm_log(self, msg):
+        """Append a timestamped message to the Farm Log."""
+        timestamp = datetime.now().strftime("[%H:%M:%S]")
+        line = f"{timestamp} {msg}"
+        self.farm_log.append(line)
+        sb = self.farm_log.verticalScrollBar()
+        sb.setValue(sb.maximum())
+
     def _refresh_queue_table(self):
         jobs = self.queue.jobs
         self.queue_table.setRowCount(len(jobs))
@@ -1255,9 +1338,13 @@ class MainWindow(QMainWindow):
 
     def _add_file_to_queue(self, filepath):
         job = self._create_job_from_settings(filepath)
-        self.queue.add_job(job)
+        if self.chk_auto_send_farm.isChecked() and self.master_server:
+            self.master_server.add_job(job)
+            self._append_farm_log(f"[GUI] Auto-sent to farm: {Path(filepath).name}")
+        else:
+            self.queue.add_job(job)
+            self._append_log(f"Added to queue: {Path(filepath).name}")
         self.config.add_recent_project(filepath)
-        self._append_log(f"Added to queue: {Path(filepath).name}")
 
     def _create_job_from_settings(self, filepath):
         """Create a RenderJob from current GUI settings."""
@@ -1493,6 +1580,14 @@ class MainWindow(QMainWindow):
             act_cancel = menu.addAction("Cancel Render")
             act_cancel.triggered.connect(self.queue.cancel_current)
 
+        # Send to Farm option for pending jobs
+        pending_selected = [j for j in selected_jobs if j.status == RenderStatus.PENDING.value]
+        if pending_selected and self.master_server:
+            menu.addSeparator()
+            n = len(pending_selected)
+            act_farm = menu.addAction(f"Send to Farm ({n} job{'s' if n > 1 else ''})")
+            act_farm.triggered.connect(lambda: self._send_jobs_to_farm(pending_selected))
+
         menu.exec(self.queue_table.viewport().mapToGlobal(pos))
 
     def _on_queue_cell_clicked(self, row, col):
@@ -1584,6 +1679,11 @@ class MainWindow(QMainWindow):
             self.edit_layercomp.clear()
 
     # --- Format/preset handling ---
+    def _on_max_renders_changed(self, value):
+        self.config.set("max_local_renders", value)
+        self.queue.max_concurrent = value
+        self._append_log(f"Max simultaneous renders set to {value}")
+
     def _on_format_changed(self, fmt):
         self._update_presets()
 
@@ -1635,11 +1735,12 @@ class MainWindow(QMainWindow):
         from src.network.master import MasterServer
         port = self.spin_port.value()
         self.master_server = MasterServer(port=port)
-        self.master_server.on_output = lambda msg: self.log_signal.emit(f"[MASTER] {msg}")
+        self.master_server.on_output = lambda msg: self.farm_log_signal.emit(f"[MASTER] {msg}")
         self.master_server.on_slave_connected = lambda s: self._refresh_slaves()
         self.master_server.on_slave_disconnected = lambda s: self._refresh_slaves()
-        self.master_server.on_job_completed = lambda j, s: self.queue_changed_signal.emit()
-        self.master_server.on_job_failed = lambda j, s: self.queue_changed_signal.emit()
+        self.master_server.on_job_completed = lambda j, s: self.farm_queue_changed_signal.emit()
+        self.master_server.on_job_failed = lambda j, s: self.farm_queue_changed_signal.emit()
+        self.master_server.on_farm_queue_changed = lambda: self.farm_queue_changed_signal.emit()
         self.master_server.start()
 
         self.btn_start_master.setEnabled(False)
@@ -1655,25 +1756,37 @@ class MainWindow(QMainWindow):
         self._slave_timer.timeout.connect(self._refresh_slaves)
         self._slave_timer.start(5000)
 
+        # Timer to refresh farm queue table
+        self._farm_queue_timer = QTimer()
+        self._farm_queue_timer.timeout.connect(self._refresh_farm_queue_table)
+        self._farm_queue_timer.start(3000)
+
     def _stop_master(self):
+        self.config.set("auto_send_to_farm", self.chk_auto_send_farm.isChecked())
         if self.master_server:
             self.master_server.stop()
             self.master_server = None
         if hasattr(self, '_slave_timer'):
             self._slave_timer.stop()
+        if hasattr(self, '_farm_queue_timer'):
+            self._farm_queue_timer.stop()
         self.btn_start_master.setEnabled(True)
         self.btn_stop_master.setEnabled(False)
         self.btn_start_slave.setEnabled(True)
         self.lbl_farm_status.setText("Status: Stopped")
         self.lbl_farm_status.setStyleSheet("color: #f9e2af; font-weight: bold;")
+        self.lbl_farm_stats.setText("Farm: not running")
+        self.lbl_farm_total_time.setText("")
+        self.farm_queue_table.setRowCount(0)
 
     def _start_slave(self):
         from src.network.slave import SlaveClient
         host = self.edit_master_host.text()
         port = self.spin_port.value()
         moho = self.edit_moho_path.text()
-        self.slave_client = SlaveClient(host, port, moho, slave_port=port + 1)
-        self.slave_client.on_output = lambda msg: self.log_signal.emit(f"[SLAVE] {msg}")
+        self.slave_client = SlaveClient(host, port, moho, slave_port=port + 1,
+                                        max_concurrent=self.config.get("max_local_renders", 1))
+        self.slave_client.on_output = lambda msg: self.farm_log_signal.emit(f"[SLAVE] {msg}")
         self.slave_client.on_status_changed = lambda s: self.lbl_farm_status.setText(f"Slave: {s}")
         self.slave_client.start()
 
@@ -1700,14 +1813,265 @@ class MainWindow(QMainWindow):
             return
         slaves = self.master_server.slaves
         self.slaves_table.setRowCount(len(slaves))
+        status_colors = {
+            "idle": "#a6e3a1",      # green
+            "rendering": "#89b4fa",  # blue
+            "offline": "#f38ba8",    # red
+        }
         for row, (key, slave) in enumerate(slaves.items()):
             self.slaves_table.setItem(row, 0, QTableWidgetItem(slave.hostname))
             self.slaves_table.setItem(row, 1, QTableWidgetItem(key))
-            status_item = QTableWidgetItem(slave.status if slave.is_alive else "offline")
+            actual_status = slave.status if slave.is_alive else "offline"
+            status_item = QTableWidgetItem(actual_status)
+            color = status_colors.get(actual_status, "#cdd6f4")
+            status_item.setForeground(QColor(color))
             self.slaves_table.setItem(row, 2, status_item)
             self.slaves_table.setItem(row, 3, QTableWidgetItem(slave.current_job_id))
             self.slaves_table.setItem(row, 4, QTableWidgetItem(str(slave.jobs_completed)))
             self.slaves_table.setItem(row, 5, QTableWidgetItem(str(slave.jobs_failed)))
+
+    def _refresh_farm_queue_table(self):
+        """Refresh the Farm Queue table with all farm jobs."""
+        if not self.master_server:
+            self.farm_queue_table.setRowCount(0)
+            self.lbl_farm_stats.setText("Farm: not running")
+            self.lbl_farm_total_time.setText("")
+            return
+
+        all_jobs = self.master_server.get_all_farm_jobs()
+
+        # Build display list: active first, reserved, pending, then completed (recent first)
+        display_jobs = []
+        for job in all_jobs["active"]:
+            display_jobs.append(("RENDERING", job))
+        for job in all_jobs["reserved"]:
+            display_jobs.append(("RESERVED", job))
+        for job in all_jobs["pending"]:
+            display_jobs.append(("PENDING", job))
+        for job in reversed(all_jobs["completed"]):
+            display_jobs.append((job.status.upper(), job))
+
+        color_map = {
+            "PENDING": "#f9e2af",     # yellow
+            "RESERVED": "#fab387",    # orange
+            "RENDERING": "#89b4fa",   # blue
+            "COMPLETED": "#a6e3a1",   # green
+            "FAILED": "#f38ba8",      # red
+            "CANCELLED": "#6c7086",   # gray
+        }
+
+        self.farm_queue_table.setRowCount(len(display_jobs))
+        total_time = 0.0
+
+        for row, (status_text, job) in enumerate(display_jobs):
+            status_item = QTableWidgetItem(status_text)
+            status_item.setForeground(QColor(color_map.get(status_text, "#cdd6f4")))
+            self.farm_queue_table.setItem(row, 0, status_item)
+            self.farm_queue_table.setItem(row, 1, QTableWidgetItem(job.project_name))
+            self.farm_queue_table.setItem(row, 2, QTableWidgetItem(job.format))
+            self.farm_queue_table.setItem(row, 3, QTableWidgetItem(job.assigned_slave or "-"))
+            self.farm_queue_table.setItem(row, 4, QTableWidgetItem(f"{job.progress:.0f}%"))
+            self.farm_queue_table.setItem(row, 5, QTableWidgetItem(job.elapsed_str))
+            self.farm_queue_table.setItem(row, 6, QTableWidgetItem(job.id))
+
+            if job.elapsed_time > 0 and job.status in (RenderStatus.COMPLETED.value, RenderStatus.FAILED.value):
+                total_time += job.elapsed_time
+
+        # Update stats
+        pending_count = len(all_jobs["pending"]) + len(all_jobs["reserved"])
+        active_count = len(all_jobs["active"])
+        completed_count = sum(1 for j in all_jobs["completed"] if j.status == RenderStatus.COMPLETED.value)
+        failed_count = sum(1 for j in all_jobs["completed"] if j.status != RenderStatus.COMPLETED.value)
+
+        self.lbl_farm_stats.setText(
+            f"Farm: {pending_count} pending | {active_count} active | "
+            f"{completed_count} completed | {failed_count} failed"
+        )
+        if total_time > 0:
+            mins, secs = divmod(int(total_time), 60)
+            hours, mins = divmod(mins, 60)
+            if hours:
+                time_str = f"{hours}h {mins}m {secs}s"
+            elif mins:
+                time_str = f"{mins}m {secs}s"
+            else:
+                time_str = f"{secs}s"
+            self.lbl_farm_total_time.setText(f"Total render time: {time_str}")
+        else:
+            self.lbl_farm_total_time.setText("")
+
+    # --- Farm: Send to Farm ---
+    def _send_selected_to_farm(self):
+        """Send selected pending jobs from local queue to the farm."""
+        if not self.master_server:
+            QMessageBox.warning(self, "Farm Not Running",
+                                "Start the master server first before sending jobs to the farm.")
+            return
+        selected_rows = sorted(set(idx.row() for idx in self.queue_table.selectedIndexes()))
+        if not selected_rows:
+            QMessageBox.information(self, "No Selection", "Select pending jobs to send to the farm.")
+            return
+        sent = 0
+        for row in reversed(selected_rows):
+            if row < len(self.queue.jobs):
+                job = self.queue.jobs[row]
+                if job.status == RenderStatus.PENDING.value:
+                    self.master_server.add_job(RenderJob.from_dict(job.to_dict()))
+                    self.queue.remove_job(job.id)
+                    sent += 1
+        if sent:
+            self._append_farm_log(f"[GUI] Sent {sent} job{'s' if sent > 1 else ''} to farm queue")
+
+    def _send_all_to_farm(self):
+        """Send all pending local queue jobs to the farm."""
+        if not self.master_server:
+            QMessageBox.warning(self, "Farm Not Running",
+                                "Start the master server first before sending jobs to the farm.")
+            return
+        pending = self.queue.get_pending_jobs()
+        if not pending:
+            QMessageBox.information(self, "No Pending Jobs", "No pending jobs in the local queue.")
+            return
+        for job in list(pending):
+            self.master_server.add_job(RenderJob.from_dict(job.to_dict()))
+            self.queue.remove_job(job.id)
+        self._append_farm_log(f"[GUI] Sent {len(pending)} job{'s' if len(pending) > 1 else ''} to farm queue")
+
+    def _send_jobs_to_farm(self, jobs):
+        """Send specific jobs to the farm (from context menu)."""
+        if not self.master_server:
+            return
+        for job in list(jobs):
+            self.master_server.add_job(RenderJob.from_dict(job.to_dict()))
+            self.queue.remove_job(job.id)
+        self._append_farm_log(f"[GUI] Sent {len(jobs)} job{'s' if len(jobs) > 1 else ''} to farm queue")
+
+    # --- Farm: Context Menus ---
+    def _show_slave_context_menu(self, pos):
+        """Right-click on a slave: offer to assign a pending job."""
+        row = self.slaves_table.rowAt(pos.y())
+        if row < 0 or not self.master_server:
+            return
+        key_item = self.slaves_table.item(row, 1)
+        status_item = self.slaves_table.item(row, 2)
+        if not key_item or not status_item:
+            return
+        slave_address = key_item.text()
+        slave_status = status_item.text()
+
+        menu = QMenu(self)
+        if slave_status == "idle":
+            act_assign = menu.addAction("Assign Job...")
+            act_assign.triggered.connect(lambda: self._assign_job_to_slave_dialog(slave_address))
+        if not menu.isEmpty():
+            menu.exec(self.slaves_table.viewport().mapToGlobal(pos))
+
+    def _assign_job_to_slave_dialog(self, slave_address):
+        """Show dialog to pick a pending farm job to assign to a specific slave."""
+        if not self.master_server:
+            return
+        pending = self.master_server.pending_jobs
+        if not pending:
+            QMessageBox.information(self, "No Pending Jobs",
+                                    "No pending jobs in the farm queue to assign.")
+            return
+        items = [f"{j.project_name} ({j.format}) [{j.id}]" for j in pending]
+        item, ok = QInputDialog.getItem(
+            self, "Assign Job",
+            f"Select a job to assign to {slave_address}:",
+            items, 0, False
+        )
+        if ok and item:
+            idx = items.index(item)
+            job = pending[idx]
+            success = self.master_server.assign_job_to_slave(job.id, slave_address)
+            if success:
+                self._append_farm_log(f"[GUI] Manually assigned {job.project_name} [{job.id}] to {slave_address}")
+            else:
+                QMessageBox.warning(self, "Assignment Failed",
+                                    "Could not assign job. It may have been taken by another slave.")
+
+    def _show_farm_queue_context_menu(self, pos):
+        """Right-click on a farm queue job."""
+        row = self.farm_queue_table.rowAt(pos.y())
+        if row < 0 or not self.master_server:
+            return
+        status_item = self.farm_queue_table.item(row, 0)
+        id_item = self.farm_queue_table.item(row, 6)
+        if not status_item or not id_item:
+            return
+        status = status_item.text()
+        job_id = id_item.text()
+
+        menu = QMenu(self)
+        if status in ("PENDING", "RESERVED"):
+            act_assign = menu.addAction("Assign to Slave...")
+            act_assign.triggered.connect(lambda: self._assign_farm_job_to_slave_dialog(job_id))
+            act_cancel = menu.addAction("Cancel Job")
+            act_cancel.triggered.connect(lambda: self._cancel_farm_job(job_id))
+            act_return = menu.addAction("Return to Local Queue")
+            act_return.triggered.connect(lambda: self._return_farm_job_to_local(job_id))
+        if status in ("COMPLETED", "FAILED", "CANCELLED"):
+            act_clear = menu.addAction("Clear Completed Jobs")
+            act_clear.triggered.connect(self._clear_completed_farm_jobs)
+        if not menu.isEmpty():
+            menu.exec(self.farm_queue_table.viewport().mapToGlobal(pos))
+
+    def _assign_farm_job_to_slave_dialog(self, job_id):
+        """Show dialog to assign a farm job to a specific idle slave."""
+        if not self.master_server:
+            return
+        idle_slaves = [
+            (addr, slave) for addr, slave in self.master_server.slaves.items()
+            if slave.is_alive and slave.status == "idle"
+        ]
+        if not idle_slaves:
+            QMessageBox.information(self, "No Idle Slaves",
+                                    "No idle slaves available for assignment.")
+            return
+        items = [f"{slave.hostname} ({addr})" for addr, slave in idle_slaves]
+        item, ok = QInputDialog.getItem(
+            self, "Assign to Slave",
+            f"Select a slave for job {job_id}:",
+            items, 0, False
+        )
+        if ok and item:
+            idx = items.index(item)
+            addr = idle_slaves[idx][0]
+            success = self.master_server.assign_job_to_slave(job_id, addr)
+            if success:
+                self._append_farm_log(f"[GUI] Assigned job [{job_id}] to {addr}")
+                self._refresh_farm_queue_table()
+            else:
+                QMessageBox.warning(self, "Assignment Failed", "Could not assign job.")
+
+    def _cancel_farm_job(self, job_id):
+        """Cancel a farm queue job."""
+        if not self.master_server:
+            return
+        job = self.master_server.cancel_job(job_id)
+        if job:
+            self._append_farm_log(f"[GUI] Cancelled farm job: {job.project_name} [{job_id}]")
+            self._refresh_farm_queue_table()
+
+    def _return_farm_job_to_local(self, job_id):
+        """Remove a job from the farm and add it back to the local queue."""
+        if not self.master_server:
+            return
+        job = self.master_server.remove_job_from_farm(job_id)
+        if job:
+            job.status = RenderStatus.PENDING.value
+            job.assigned_slave = ""
+            self.queue.add_job(job)
+            self._append_farm_log(f"[GUI] Returned to local queue: {job.project_name} [{job_id}]")
+            self._refresh_farm_queue_table()
+
+    def _clear_completed_farm_jobs(self):
+        """Clear completed/failed/cancelled farm job history."""
+        if not self.master_server:
+            return
+        self.master_server.clear_completed_farm_jobs()
+        self._refresh_farm_queue_table()
 
     # --- Render Presets ---
     def _load_preset_list(self):
@@ -1886,16 +2250,17 @@ class MainWindow(QMainWindow):
         self._close_log_file()
 
     def _on_render_timer_tick(self):
-        """Update Progress and Time columns for the currently rendering job."""
-        current = self.queue.current_job
-        if current is None:
+        """Update Progress and Time columns for all currently rendering jobs."""
+        current_jobs = self.queue.current_jobs
+        if not current_jobs:
             return
+        job_map = {j.id: j for j in current_jobs}
         for row in range(self.queue_table.rowCount()):
             id_item = self.queue_table.item(row, 8)
-            if id_item and id_item.text() == current.id:
-                self.queue_table.setItem(row, 5, QTableWidgetItem(f"{current.progress:.0f}%"))
-                self.queue_table.setItem(row, 6, QTableWidgetItem(current.elapsed_str))
-                break
+            if id_item and id_item.text() in job_map:
+                job = job_map[id_item.text()]
+                self.queue_table.setItem(row, 5, QTableWidgetItem(f"{job.progress:.0f}%"))
+                self.queue_table.setItem(row, 6, QTableWidgetItem(job.elapsed_str))
 
     # --- CPU monitor ---
     def _init_cpu_monitor(self):
@@ -2022,6 +2387,10 @@ class MainWindow(QMainWindow):
                 return
             self.queue.stop()
 
+        if hasattr(self, '_farm_queue_timer'):
+            self._farm_queue_timer.stop()
+        if hasattr(self, '_slave_timer'):
+            self._slave_timer.stop()
         if self.master_server:
             self.master_server.stop()
         if self.slave_client:
@@ -2030,6 +2399,7 @@ class MainWindow(QMainWindow):
         self._close_log_file()
         self._stop_ipc_server()
 
-        # Save moho path if changed
+        # Save settings
         self.config.moho_path = self.edit_moho_path.text()
+        self.config.set("auto_send_to_farm", self.chk_auto_send_farm.isChecked())
         event.accept()

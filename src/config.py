@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 APP_NAME = "Moho Render Farm"
-APP_VERSION = "1.2.2"
+APP_VERSION = "1.3.0"
 APP_AUTHOR = "Damian Turkieh"
 
 DEFAULT_MOHO_PATH = r"C:\Program Files\Moho 14\Moho.exe"
@@ -26,6 +26,8 @@ DEFAULT_CONFIG = {
     "recent_queues": [],
     "max_recent": 20,
     "default_preset": "",
+    "auto_send_to_farm": False,
+    "max_local_renders": 1,
 }
 
 FORMATS = [

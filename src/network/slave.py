@@ -2,7 +2,7 @@
 import socket
 import threading
 import time
-from typing import Optional, Callable
+from typing import Optional, Callable, Dict, Tuple, List
 import requests
 from src.moho_renderer import RenderJob, MohoRenderer, RenderStatus
 
@@ -10,17 +10,19 @@ from src.moho_renderer import RenderJob, MohoRenderer, RenderStatus
 class SlaveClient:
     """Connects to a master server and processes render jobs."""
 
-    def __init__(self, master_host: str, master_port: int, moho_path: str, slave_port: int = 0):
+    def __init__(self, master_host: str, master_port: int, moho_path: str,
+                 slave_port: int = 0, max_concurrent: int = 1):
         self.master_host = master_host
         self.master_port = master_port
         self.moho_path = moho_path
         self.slave_port = slave_port
         self.hostname = socket.gethostname()
+        self._max_concurrent = max(1, max_concurrent)
         self._running = False
-        self._thread = None
+        self._workers: List[threading.Thread] = []
         self._heartbeat_thread = None
-        self._renderer: Optional[MohoRenderer] = None
-        self._current_job: Optional[RenderJob] = None
+        self._lock = threading.Lock()
+        self._active_renders: Dict[int, Tuple[MohoRenderer, RenderJob]] = {}
 
         # Callbacks
         self.on_connected: Optional[Callable[[], None]] = None
@@ -38,23 +40,34 @@ class SlaveClient:
     def is_running(self):
         return self._running
 
+    @property
+    def current_jobs(self) -> list:
+        """Return list of all currently rendering jobs."""
+        with self._lock:
+            return [job for _, job in self._active_renders.values()]
+
     def start(self):
-        """Start the slave client."""
+        """Start the slave client with concurrent workers."""
         if self._running:
             return
         self._running = True
-        self._thread = threading.Thread(target=self._worker_loop, daemon=True)
-        self._thread.start()
+        self._workers = []
+        for i in range(self._max_concurrent):
+            t = threading.Thread(target=self._worker_loop, args=(i,), daemon=True)
+            self._workers.append(t)
+            t.start()
         self._heartbeat_thread = threading.Thread(target=self._heartbeat_loop, daemon=True)
         self._heartbeat_thread.start()
 
     def stop(self):
-        """Stop the slave client."""
+        """Stop the slave client and cancel all active renders."""
         self._running = False
-        if self._renderer:
-            self._renderer.cancel()
-        if self._thread:
-            self._thread.join(timeout=10)
+        with self._lock:
+            for renderer, _ in self._active_renders.values():
+                renderer.cancel()
+        for t in self._workers:
+            t.join(timeout=10)
+        self._workers = []
 
     def _register(self) -> bool:
         """Register with the master server."""
@@ -82,18 +95,24 @@ class SlaveClient:
         """Send periodic heartbeats to master."""
         while self._running:
             try:
-                status = "rendering" if self._current_job else "idle"
+                with self._lock:
+                    active_count = len(self._active_renders)
+                status = "rendering" if active_count > 0 else "idle"
                 requests.post(
                     f"{self.master_url}/api/heartbeat",
-                    json={"port": self.slave_port, "status": status},
+                    json={
+                        "port": self.slave_port,
+                        "status": status,
+                        "active_jobs": active_count,
+                    },
                     timeout=5,
                 )
             except Exception:
                 pass
             time.sleep(10)
 
-    def _worker_loop(self):
-        """Main worker loop: request and process jobs."""
+    def _worker_loop(self, worker_id: int):
+        """Worker loop: request and process jobs from master."""
         registered = False
         while self._running:
             if not registered:
@@ -114,7 +133,7 @@ class SlaveClient:
                     job_data = data.get("job")
                     if job_data:
                         job = RenderJob.from_dict(job_data)
-                        self._process_job(job)
+                        self._process_job(worker_id, job)
                     else:
                         time.sleep(3)
                 elif resp.status_code == 403:
@@ -127,28 +146,35 @@ class SlaveClient:
                 if self.on_disconnected:
                     self.on_disconnected()
                 if self.on_output:
-                    self.on_output("Lost connection to master, reconnecting...")
+                    self.on_output(f"Worker {worker_id}: Lost connection to master, reconnecting...")
                 time.sleep(5)
             except Exception as e:
                 if self.on_output:
-                    self.on_output(f"Worker error: {e}")
+                    self.on_output(f"Worker {worker_id} error: {e}")
                 time.sleep(5)
 
-    def _process_job(self, job: RenderJob):
+    def _process_job(self, worker_id: int, job: RenderJob):
         """Process a single render job."""
-        self._current_job = job
+        renderer = MohoRenderer(self.moho_path)
+        with self._lock:
+            self._active_renders[worker_id] = (renderer, job)
+
         if self.on_job_started:
             self.on_job_started(job)
         if self.on_output:
-            self.on_output(f"Processing job: {job.project_name}")
+            self.on_output(f"Worker {worker_id}: Processing job: {job.project_name}")
         if self.on_status_changed:
-            self.on_status_changed("rendering")
+            with self._lock:
+                count = len(self._active_renders)
+            self.on_status_changed(f"rendering ({count} active)")
 
-        self._renderer = MohoRenderer(self.moho_path)
-        self._renderer.render(
+        renderer.render(
             job,
             on_output=self.on_output,
         )
+
+        with self._lock:
+            self._active_renders.pop(worker_id, None)
 
         # Report completion
         success = job.status == RenderStatus.COMPLETED.value
@@ -170,7 +196,7 @@ class SlaveClient:
         if self.on_job_completed:
             self.on_job_completed(job)
         if self.on_status_changed:
-            self.on_status_changed("idle")
-
-        self._current_job = None
-        self._renderer = None
+            with self._lock:
+                count = len(self._active_renders)
+            status = f"rendering ({count} active)" if count > 0 else "idle"
+            self.on_status_changed(status)

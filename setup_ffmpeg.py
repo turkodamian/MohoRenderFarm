@@ -6,16 +6,18 @@ import urllib.request
 import shutil
 from pathlib import Path
 
-FFMPEG_URL = "https://github.com/turkodamian/MohoRenderFarm/releases/download/v1.2.0/ffmpeg.zip"
+# Public FFmpeg builds from BtbN (GitHub) - always points to latest release
+FFMPEG_URL = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
 FFMPEG_DIR = Path(__file__).parent / "ffmpeg"
-FFMPEG_ZIP = Path(__file__).parent / "ffmpeg.zip"
+FFMPEG_ZIP = Path(__file__).parent / "ffmpeg-download.zip"
 
 
 def download_with_progress(url, dest):
-    """Download a file with progress display."""
+    """Download a file with progress display, following redirects."""
     print(f"  Downloading from:\n  {url}")
     try:
-        response = urllib.request.urlopen(url)
+        req = urllib.request.Request(url, headers={"User-Agent": "MohoRenderFarm/1.0"})
+        response = urllib.request.urlopen(req)
     except urllib.error.URLError as e:
         print(f"  ERROR: Could not connect: {e}")
         return False
@@ -51,12 +53,23 @@ def setup_ffmpeg():
     if not download_with_progress(FFMPEG_URL, str(FFMPEG_ZIP)):
         return False
 
-    # Extract
+    # Extract - public builds have nested directory structure:
+    # ffmpeg-master-latest-win64-gpl/bin/ffmpeg.exe
     print("  Extracting ffmpeg.zip...")
     try:
         FFMPEG_DIR.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(str(FFMPEG_ZIP), "r") as zf:
-            zf.extractall(str(FFMPEG_DIR))
+            # Find ffmpeg.exe and ffprobe.exe inside the zip
+            extracted = []
+            for member in zf.namelist():
+                basename = os.path.basename(member)
+                if basename in ("ffmpeg.exe", "ffprobe.exe"):
+                    # Extract directly into FFMPEG_DIR (flatten the path)
+                    target = FFMPEG_DIR / basename
+                    with zf.open(member) as src, open(target, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                    extracted.append(basename)
+                    print(f"  Extracted: {basename}")
     except (zipfile.BadZipFile, OSError) as e:
         print(f"  ERROR: Failed to extract: {e}")
         return False
@@ -67,8 +80,7 @@ def setup_ffmpeg():
 
     # Verify
     if (FFMPEG_DIR / "ffmpeg.exe").exists():
-        count = len(list(FFMPEG_DIR.iterdir()))
-        print(f"  FFmpeg installed successfully ({count} files)")
+        print(f"  FFmpeg installed successfully ({len(extracted)} files)")
         return True
     else:
         print("  ERROR: ffmpeg.exe not found after extraction.")
