@@ -380,6 +380,10 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 
 ## Changelog
 
+### v1.2.2
+- **CPU Monitor** - Real-time CPU usage bar in the header, updated every second via Windows API (no extra dependencies)
+- **Confirmation Dialogs** - Stop/Escape, Delete key, and Remove now ask for confirmation before acting
+
 ### v1.2.1
 - **Single-Instance IPC** - Context menu "Add to Queue" now adds to the existing running instance instead of opening a new window
 - **Gradual Progress for PNG AllComps** - Progress column now counts frame files across subdirectories for accurate real-time progress

@@ -186,6 +186,15 @@ QProgressBar::chunk {
     background-color: #89b4fa;
     border-radius: 3px;
 }
+QProgressBar#cpuBar {
+    min-height: 16px;
+    font-size: 11px;
+    color: #f5c2d0;
+}
+QProgressBar#cpuBar::chunk {
+    background-color: #a04058;
+    border-radius: 3px;
+}
 QScrollBar:vertical {
     background-color: #181825;
     width: 10px;

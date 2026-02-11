@@ -556,6 +556,7 @@ class MainWindow(QMainWindow):
         self._setup_menu()
         self.setAcceptDrops(True)
         self._start_ipc_server()
+        self._init_cpu_monitor()
 
         # Load default preset if configured
         default_preset = self.config.get("default_preset", "")
@@ -596,11 +597,25 @@ class MainWindow(QMainWindow):
         header.addLayout(header_text)
         header.addStretch()
 
-        # Global progress
+        # Right side: progress bars
+        right_col = QVBoxLayout()
+        right_col.setSpacing(2)
+
         self.global_progress = QProgressBar()
         self.global_progress.setFixedWidth(300)
         self.global_progress.setFormat("%v/%m jobs completed")
-        header.addWidget(self.global_progress)
+        right_col.addWidget(self.global_progress)
+
+        self.cpu_progress = QProgressBar()
+        self.cpu_progress.setFixedWidth(300)
+        self.cpu_progress.setFixedHeight(18)
+        self.cpu_progress.setRange(0, 100)
+        self.cpu_progress.setValue(0)
+        self.cpu_progress.setFormat("CPU: %v%")
+        self.cpu_progress.setObjectName("cpuBar")
+        right_col.addWidget(self.cpu_progress)
+
+        header.addLayout(right_col)
         main_layout.addLayout(header)
 
         # Tabs
@@ -1353,6 +1368,14 @@ class MainWindow(QMainWindow):
                 self.btn_pause_queue.setText("Resume")
 
     def _stop_queue(self):
+        if self.queue.is_running:
+            reply = QMessageBox.question(
+                self, "Stop Queue",
+                "Are you sure you want to stop the render queue?\nThe current job will be cancelled.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
         self.queue.stop()
         self._stop_render_timer()
         self._append_log("Queue stopped")
@@ -1399,11 +1422,32 @@ class MainWindow(QMainWindow):
         selected_rows = sorted(set(idx.row() for idx in self.queue_table.selectedIndexes()), reverse=True)
         if not selected_rows:
             return
-        for row in selected_rows:
-            if row < len(self.queue.jobs):
-                job = self.queue.jobs[row]
-                if job.status != RenderStatus.RENDERING.value:
-                    self.queue.remove_job(job.id)
+        removable = [self.queue.jobs[r] for r in selected_rows
+                     if r < len(self.queue.jobs) and self.queue.jobs[r].status != RenderStatus.RENDERING.value]
+        if not removable:
+            return
+        reply = QMessageBox.question(
+            self, "Remove Jobs",
+            f"Remove {len(removable)} job{'s' if len(removable) > 1 else ''} from the queue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        for job in removable:
+            self.queue.remove_job(job.id)
+
+    def _confirm_remove_job(self, job_id):
+        """Remove a single job after confirmation."""
+        job = self.queue.get_job(job_id)
+        if not job:
+            return
+        reply = QMessageBox.question(
+            self, "Remove Job",
+            f"Remove '{job.project_name}' from the queue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self.queue.remove_job(job_id)
 
     # --- Context menu for queue table ---
     def _show_queue_context_menu(self, pos):
@@ -1444,7 +1488,7 @@ class MainWindow(QMainWindow):
         act_down.triggered.connect(lambda: self.queue.move_job(job.id, 1))
         menu.addSeparator()
         act_remove = menu.addAction("Remove")
-        act_remove.triggered.connect(lambda: self.queue.remove_job(job.id))
+        act_remove.triggered.connect(lambda: self._confirm_remove_job(job.id))
         if job.status == RenderStatus.RENDERING.value:
             act_cancel = menu.addAction("Cancel Render")
             act_cancel.triggered.connect(self.queue.cancel_current)
@@ -1852,6 +1896,54 @@ class MainWindow(QMainWindow):
                 self.queue_table.setItem(row, 5, QTableWidgetItem(f"{current.progress:.0f}%"))
                 self.queue_table.setItem(row, 6, QTableWidgetItem(current.elapsed_str))
                 break
+
+    # --- CPU monitor ---
+    def _init_cpu_monitor(self):
+        """Initialize CPU usage monitoring using Windows GetSystemTimes."""
+        self._prev_cpu_times = self._get_system_times()
+        self._cpu_timer = QTimer()
+        self._cpu_timer.timeout.connect(self._update_cpu_usage)
+        self._cpu_timer.start(1000)
+
+    def _get_system_times(self):
+        """Get idle/kernel/user times via Windows API."""
+        import ctypes
+        from ctypes import wintypes
+
+        class FILETIME(ctypes.Structure):
+            _fields_ = [("dwLowDateTime", wintypes.DWORD),
+                         ("dwHighDateTime", wintypes.DWORD)]
+
+        idle = FILETIME()
+        kernel = FILETIME()
+        user = FILETIME()
+
+        if not ctypes.windll.kernel32.GetSystemTimes(
+                ctypes.byref(idle), ctypes.byref(kernel), ctypes.byref(user)):
+            return (0, 0, 0)
+
+        idle_val = (idle.dwHighDateTime << 32) | idle.dwLowDateTime
+        kernel_val = (kernel.dwHighDateTime << 32) | kernel.dwLowDateTime
+        user_val = (user.dwHighDateTime << 32) | user.dwLowDateTime
+        return (idle_val, kernel_val, user_val)
+
+    def _update_cpu_usage(self):
+        """Calculate and display current CPU usage."""
+        current = self._get_system_times()
+        prev = self._prev_cpu_times
+        self._prev_cpu_times = current
+
+        idle_delta = current[0] - prev[0]
+        kernel_delta = current[1] - prev[1]
+        user_delta = current[2] - prev[2]
+
+        # kernel_time includes idle time
+        total = kernel_delta + user_delta
+        if total == 0:
+            return
+        cpu_pct = ((total - idle_delta) / total) * 100.0
+        cpu_pct = max(0.0, min(100.0, cpu_pct))
+        self.cpu_progress.setValue(int(cpu_pct))
 
     # --- Single-instance IPC server ---
     def _start_ipc_server(self):
