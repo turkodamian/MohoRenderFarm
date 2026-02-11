@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
     QDialog, QDialogButtonBox, QInputDialog, QScrollArea,
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QMimeData, QUrl
-from PyQt6.QtGui import QAction, QDragEnterEvent, QDropEvent, QIcon, QShortcut, QKeySequence
+from PyQt6.QtGui import QAction, QDragEnterEvent, QDropEvent, QIcon, QShortcut, QKeySequence, QFont, QColor
 from src.config import (
     AppConfig, APP_NAME, APP_VERSION, APP_AUTHOR,
     FORMATS, WINDOWS_PRESETS, RESOLUTIONS, MOHO_FILE_EXTENSIONS,
@@ -677,6 +677,7 @@ class MainWindow(QMainWindow):
         self.queue_table.verticalHeader().setVisible(False)
         self.queue_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.queue_table.customContextMenuRequested.connect(self._show_queue_context_menu)
+        self.queue_table.cellClicked.connect(self._on_queue_cell_clicked)
         top_layout.addWidget(self.queue_table)
 
         splitter.addWidget(top_widget)
@@ -1151,22 +1152,26 @@ class MainWindow(QMainWindow):
                 "failed": "#f38ba8",
                 "cancelled": "#6c7086",
             }
-            status_item.setForeground(
-                __import__("PyQt6.QtGui", fromlist=["QColor"]).QColor(
-                    color_map.get(job.status, "#cdd6f4")
-                )
-            )
+            status_item.setForeground(QColor(color_map.get(job.status, "#cdd6f4")))
             self.queue_table.setItem(row, 0, status_item)
 
-            # Project
-            self.queue_table.setItem(row, 1, QTableWidgetItem(job.project_name))
+            # Project (clickable)
+            proj_item = QTableWidgetItem(job.project_name)
+            link_font = QFont()
+            link_font.setUnderline(True)
+            proj_item.setFont(link_font)
+            proj_item.setForeground(QColor("#89b4fa"))
+            self.queue_table.setItem(row, 1, proj_item)
             # Format
             self.queue_table.setItem(row, 2, QTableWidgetItem(f"{job.format}"))
             # Layer Comp
             self.queue_table.setItem(row, 3, QTableWidgetItem(job.layercomp or "(default)"))
-            # Output
+            # Output (clickable)
             out = job.output_path or "(project folder)"
-            self.queue_table.setItem(row, 4, QTableWidgetItem(out))
+            out_item = QTableWidgetItem(out)
+            out_item.setFont(link_font)
+            out_item.setForeground(QColor("#89b4fa"))
+            self.queue_table.setItem(row, 4, out_item)
             # Progress
             prog_item = QTableWidgetItem(f"{job.progress:.0f}%")
             self.queue_table.setItem(row, 5, prog_item)
@@ -1438,19 +1443,44 @@ class MainWindow(QMainWindow):
 
         menu.exec(self.queue_table.viewport().mapToGlobal(pos))
 
-    def _show_in_explorer(self, job):
-        """Open Windows Explorer with the project file selected."""
+    def _on_queue_cell_clicked(self, row, col):
+        """Handle clicks on Project (col 1) and Output (col 4) to open Explorer."""
+        if row < 0 or row >= len(self.queue.jobs):
+            return
+        job = self.queue.jobs[row]
+        if col == 1:
+            self._open_in_explorer(job.project_file)
+        elif col == 4:
+            path = job.output_path
+            if path:
+                # For file paths, select the file; for dirs, open the dir
+                p = Path(path)
+                if p.suffix:
+                    # It's a file path - open parent dir, select file if it exists
+                    self._open_in_explorer(str(p) if p.exists() else str(p.parent))
+                else:
+                    self._open_in_explorer(str(p))
+            else:
+                # No output path = project folder
+                self._open_in_explorer(os.path.dirname(job.project_file))
+
+    def _open_in_explorer(self, filepath):
+        """Open Windows Explorer at the given path."""
         import subprocess
-        filepath = job.project_file
-        if os.path.exists(filepath):
-            subprocess.Popen(['explorer', '/select,', os.path.normpath(filepath)])
+        filepath = os.path.normpath(filepath)
+        if os.path.isfile(filepath):
+            subprocess.Popen(['explorer', '/select,', filepath])
+        elif os.path.isdir(filepath):
+            subprocess.Popen(['explorer', filepath])
         else:
-            # Open the parent folder if file doesn't exist
+            # Try parent folder
             folder = os.path.dirname(filepath)
             if os.path.exists(folder):
-                subprocess.Popen(['explorer', os.path.normpath(folder)])
-            else:
-                QMessageBox.warning(self, "Not Found", f"File not found:\n{filepath}")
+                subprocess.Popen(['explorer', folder])
+
+    def _show_in_explorer(self, job):
+        """Open Windows Explorer with the project file selected."""
+        self._open_in_explorer(job.project_file)
 
     def _edit_job_settings(self, jobs):
         """Open the Edit Render Settings dialog for the given jobs."""
