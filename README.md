@@ -58,6 +58,7 @@ install.bat
 
 # Or install manually:
 python -m pip install -r requirements.txt
+python setup_ffmpeg.py
 ```
 
 ### Launch
@@ -148,7 +149,7 @@ When rendering with layer comps (e.g., `AllLayerComps`) and the **Auto-compose**
 
 ### Requirements
 
-FFmpeg is bundled in the `ffmpeg/` folder. No additional installation needed.
+FFmpeg is downloaded automatically by `install.bat` or `python setup_ffmpeg.py`. No manual installation needed.
 
 ---
 
@@ -326,7 +327,8 @@ MohoRenderFarm/
 ├── start.bat               # Quick launcher
 ├── install.bat             # Installer
 ├── requirements.txt        # Python dependencies
-├── ffmpeg/                 # Bundled FFmpeg (Git LFS)
+├── setup_ffmpeg.py         # FFmpeg auto-downloader
+├── ffmpeg/                 # FFmpeg binaries (auto-downloaded)
 │   ├── ffmpeg.exe          # FFmpeg encoder
 │   ├── ffprobe.exe         # FFmpeg probe
 │   └── *.dll               # FFmpeg libraries
@@ -355,7 +357,7 @@ MohoRenderFarm/
 - **Python** 3.10 or higher
 - **Moho Pro 14** (or compatible version)
 - **Windows** (tested on Windows 10/11)
-- **FFmpeg** - Bundled in `ffmpeg/` folder (used for layer comp composition)
+- **FFmpeg** - Auto-downloaded by installer (used for layer comp composition)
 - **Dependencies**: PyQt6, Flask, requests (installed via `install.bat` or `pip`)
 
 ---
@@ -386,7 +388,7 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 - **Layer Comp Transition Detection** - Log monitor resets progress tracking on "Done!" for multi-comp renders
 - **Timestamped Log Output** - All log lines include `[HH:MM:SS]` timestamps
 - **Auto-save Log** - Output log automatically saved to `%APPDATA%\MohoRenderFarm\logs\` during queue execution
-- **Git LFS Installer Step** - install.bat now auto-pulls Git LFS files (ffmpeg binaries) on fresh clones
+- **FFmpeg Auto-Download** - FFmpeg downloaded from GitHub Releases via Python (no Git LFS needed)
 
 ### v1.1.0
 - **Render Settings Presets** - Save/load/delete render presets with default preset support
