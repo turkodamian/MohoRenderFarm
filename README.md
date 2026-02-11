@@ -113,7 +113,7 @@ Save and load your render settings as named presets. Set a default preset that l
 | Extra-smooth | Extra image quality | No |
 | Premultiply Alpha | Premultiply alpha channel | Yes |
 | NTSC Safe Colors | Clamp to NTSC-safe range | No |
-| Max Simultaneous Renders | Number of jobs to render concurrently (1-16) | 1 |
+| Reverse Layer Order | Reverse compositing order (first alphabetically = background) | Yes |
 | Copy Images | Copy `\Images` folder to project root (fix offline media) | No |
 | Render AllComps | Checkbox to render all layer comps at once | No |
 | Custom Layer Comp | Specific layer comp name or AllLayerComps | None |
@@ -140,6 +140,7 @@ Set up distributed rendering across multiple PCs:
 ### App Settings Tab
 - **Moho.exe Path** - Configure the path to Moho.exe (default: `C:\Program Files\Moho 14\Moho.exe`)
 - **Max Simultaneous Renders** - Number of concurrent renders (1-16), applies to both local queue and slave mode
+- **Default Output Folder** - Set a custom default output folder or use project folder as default
 - **Windows Integration** - Register/unregister right-click context menu for .moho files
 
 ---
@@ -387,6 +388,11 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 ---
 
 ## Changelog
+
+### v1.3.1
+- **Default Output Folder** - App Settings option to set a custom default output folder or use the project folder as default for all renders
+- **Reverse Layer Order** - FFmpeg auto-compose now defaults to reversed alphabetical order (first alphabetically = background), with a checkbox to toggle
+- **Max Simultaneous Renders moved to App Settings** - Setting relocated from Render Settings to App Settings for easier access
 
 ### v1.3.0
 - **Concurrent Rendering** - Configurable "Max simultaneous renders" (1-16) in Render Settings, allows rendering multiple jobs at the same time for both local queue and slave mode

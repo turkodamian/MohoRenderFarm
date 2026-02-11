@@ -1,7 +1,7 @@
 @echo off
 title Moho Render Farm
 echo ============================================
-echo   Moho Render Farm v1.3.0
+echo   Moho Render Farm v1.3.1
 echo   by Damian Turkieh
 echo ============================================
 echo.
