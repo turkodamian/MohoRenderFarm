@@ -871,14 +871,6 @@ class MainWindow(QMainWindow):
         self.chk_copy_images = QCheckBox("Copy \\Images to project root (fix offline media)")
         options_grid.addWidget(self.chk_copy_images, 4, 0, 1, 3)
 
-        options_grid.addWidget(QLabel("Max simultaneous renders:"), 5, 0)
-        self.spin_max_renders = QSpinBox()
-        self.spin_max_renders.setRange(1, 16)
-        self.spin_max_renders.setValue(self.config.get("max_local_renders", 1))
-        self.spin_max_renders.setToolTip("Number of jobs to render concurrently (local queue and slave mode)")
-        self.spin_max_renders.valueChanged.connect(self._on_max_renders_changed)
-        options_grid.addWidget(self.spin_max_renders, 5, 1)
-
         layout.addWidget(options_group)
 
         # Layer comps
@@ -1085,6 +1077,19 @@ class MainWindow(QMainWindow):
         moho_layout.addRow("Moho.exe Path:", moho_row)
 
         layout.addWidget(moho_group)
+
+        # Rendering performance
+        perf_group = QGroupBox("Rendering")
+        perf_layout = QFormLayout(perf_group)
+
+        self.spin_max_renders = QSpinBox()
+        self.spin_max_renders.setRange(1, 16)
+        self.spin_max_renders.setValue(self.config.get("max_local_renders", 1))
+        self.spin_max_renders.setToolTip("Number of jobs to render concurrently (local queue and slave mode)")
+        self.spin_max_renders.valueChanged.connect(self._on_max_renders_changed)
+        perf_layout.addRow("Max simultaneous renders:", self.spin_max_renders)
+
+        layout.addWidget(perf_group)
 
         # Default output folder
         output_group = QGroupBox("Default Output Folder")
