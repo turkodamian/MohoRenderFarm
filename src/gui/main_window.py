@@ -38,6 +38,25 @@ class EditSettingsDialog(QDialog):
     def _setup_ui(self):
         layout = QVBoxLayout(self)
 
+        # --- Render Presets ---
+        preset_group = QGroupBox("Render Presets")
+        preset_layout = QHBoxLayout(preset_group)
+        preset_layout.addWidget(QLabel("Preset:"))
+        self.combo_render_preset = QComboBox()
+        self.combo_render_preset.setMinimumWidth(200)
+        self.combo_render_preset.addItem("(none)")
+        self._load_preset_list()
+        self.combo_render_preset.currentTextChanged.connect(self._on_preset_selected)
+        preset_layout.addWidget(self.combo_render_preset)
+        self.btn_save_preset = QPushButton("Save Preset")
+        self.btn_save_preset.clicked.connect(self._save_preset)
+        preset_layout.addWidget(self.btn_save_preset)
+        self.btn_delete_preset = QPushButton("Delete Preset")
+        self.btn_delete_preset.clicked.connect(self._delete_preset)
+        preset_layout.addWidget(self.btn_delete_preset)
+        preset_layout.addStretch()
+        layout.addWidget(preset_group)
+
         # --- Output Settings ---
         self.chk_apply_output = QCheckBox("Apply Output Settings")
         layout.addWidget(self.chk_apply_output)
@@ -295,6 +314,148 @@ class EditSettingsDialog(QDialog):
             self.chk_apply_options.setChecked(True)
             self.chk_apply_layercomp.setChecked(True)
             self.chk_apply_qt.setChecked(True)
+
+    def _load_preset_list(self):
+        """Populate the preset combo from saved JSON files."""
+        PRESETS_DIR.mkdir(parents=True, exist_ok=True)
+        for f in sorted(PRESETS_DIR.glob("*.json")):
+            self.combo_render_preset.addItem(f.stem)
+
+    def _on_preset_selected(self, name):
+        """Load preset settings into widgets when selected."""
+        if name == "(none)" or not name:
+            return
+        preset_file = PRESETS_DIR / f"{name}.json"
+        if not preset_file.exists():
+            return
+        try:
+            with open(preset_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, IOError):
+            return
+
+        # Output settings
+        self.combo_format.setCurrentText(data.get("format", "MP4"))
+        self._update_presets()
+        opts = data.get("options", "")
+        if opts:
+            idx = self.combo_preset.findText(opts)
+            if idx >= 0:
+                self.combo_preset.setCurrentIndex(idx)
+        self.edit_output_dir.setText(data.get("output_dir", ""))
+        self.chk_subfolder_project.setChecked(data.get("subfolder_project", False))
+
+        # Frame range
+        custom_frames = data.get("custom_frames", False)
+        self.chk_custom_frames.setChecked(custom_frames)
+        if custom_frames:
+            self.spin_start_frame.setValue(data.get("start_frame", 1))
+            self.spin_end_frame.setValue(data.get("end_frame", 24))
+
+        # Render options
+        self.chk_multithread.setChecked(data.get("multithread", True))
+        self.chk_halfsize.setChecked(data.get("halfsize", False))
+        self.chk_halffps.setChecked(data.get("halffps", False))
+        self.chk_shapefx.setChecked(data.get("shapefx", True))
+        self.chk_layerfx.setChecked(data.get("layerfx", True))
+        self.chk_fewparticles.setChecked(data.get("fewparticles", False))
+        self.chk_aa.setChecked(data.get("aa", True))
+        self.chk_extrasmooth.setChecked(data.get("extrasmooth", False))
+        self.chk_premultiply.setChecked(data.get("premultiply", True))
+        self.chk_ntscsafe.setChecked(data.get("ntscsafe", False))
+        self.chk_verbose.setChecked(data.get("verbose", True))
+        self.chk_copy_images.setChecked(data.get("copy_images", False))
+
+        # Layer comps
+        lc_value = data.get("layercomp", "")
+        if lc_value.lower() in ("allcomps", "alllayercomps"):
+            self.chk_allcomps.setChecked(True)
+        else:
+            self.chk_allcomps.setChecked(False)
+            self.edit_layercomp.setText(lc_value)
+        self.chk_addlayercompsuffix.setChecked(data.get("addlayercompsuffix", False))
+        self.chk_createfolderforlayercomp.setChecked(data.get("createfolderforlayercomps", False))
+        self.chk_addformatsuffix.setChecked(data.get("addformatsuffix", False))
+        self.chk_compose_layers.setChecked(data.get("compose_layers", False))
+
+        # QT options
+        quality = data.get("quality", 3)
+        idx = self.combo_quality.findData(quality)
+        if idx >= 0:
+            self.combo_quality.setCurrentIndex(idx)
+        self.spin_depth.setValue(data.get("depth", 24))
+
+        # Auto-check all Apply groups when loading a preset
+        self.chk_apply_output.setChecked(True)
+        self.chk_apply_frames.setChecked(True)
+        self.chk_apply_options.setChecked(True)
+        self.chk_apply_layercomp.setChecked(True)
+        self.chk_apply_qt.setChecked(True)
+
+    def _save_preset(self):
+        """Save current settings as a named preset."""
+        name, ok = QInputDialog.getText(self, "Save Preset", "Preset name:")
+        if not ok or not name.strip():
+            return
+        name = name.strip()
+        data = {
+            "format": self.combo_format.currentText(),
+            "options": self.combo_preset.currentText(),
+            "output_dir": self.edit_output_dir.text(),
+            "subfolder_project": self.chk_subfolder_project.isChecked(),
+            "custom_frames": self.chk_custom_frames.isChecked(),
+            "start_frame": self.spin_start_frame.value(),
+            "end_frame": self.spin_end_frame.value(),
+            "multithread": self.chk_multithread.isChecked(),
+            "halfsize": self.chk_halfsize.isChecked(),
+            "halffps": self.chk_halffps.isChecked(),
+            "shapefx": self.chk_shapefx.isChecked(),
+            "layerfx": self.chk_layerfx.isChecked(),
+            "fewparticles": self.chk_fewparticles.isChecked(),
+            "aa": self.chk_aa.isChecked(),
+            "extrasmooth": self.chk_extrasmooth.isChecked(),
+            "premultiply": self.chk_premultiply.isChecked(),
+            "ntscsafe": self.chk_ntscsafe.isChecked(),
+            "verbose": self.chk_verbose.isChecked(),
+            "copy_images": self.chk_copy_images.isChecked(),
+            "layercomp": self.edit_layercomp.text(),
+            "addlayercompsuffix": self.chk_addlayercompsuffix.isChecked(),
+            "createfolderforlayercomps": self.chk_createfolderforlayercomp.isChecked(),
+            "addformatsuffix": self.chk_addformatsuffix.isChecked(),
+            "compose_layers": self.chk_compose_layers.isChecked(),
+            "quality": self.combo_quality.currentData(),
+            "depth": self.spin_depth.value(),
+        }
+        PRESETS_DIR.mkdir(parents=True, exist_ok=True)
+        preset_file = PRESETS_DIR / f"{name}.json"
+        try:
+            with open(preset_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+        except IOError as e:
+            QMessageBox.critical(self, "Error", f"Failed to save preset:\n{e}")
+            return
+        if self.combo_render_preset.findText(name) < 0:
+            self.combo_render_preset.addItem(name)
+        self.combo_render_preset.setCurrentText(name)
+
+    def _delete_preset(self):
+        """Delete the currently selected preset."""
+        name = self.combo_render_preset.currentText()
+        if name == "(none)" or not name:
+            return
+        reply = QMessageBox.question(
+            self, "Delete Preset",
+            f"Delete preset '{name}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        preset_file = PRESETS_DIR / f"{name}.json"
+        if preset_file.exists():
+            preset_file.unlink()
+        idx = self.combo_render_preset.findText(name)
+        if idx >= 0:
+            self.combo_render_preset.removeItem(idx)
 
     def _apply(self):
         """Apply checked settings to all selected jobs."""
@@ -1272,7 +1433,18 @@ class MainWindow(QMainWindow):
     def _edit_job_settings(self, jobs):
         """Open the Edit Render Settings dialog for the given jobs."""
         dialog = EditSettingsDialog(jobs, parent=self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
+        result = dialog.exec()
+        # Refresh main preset combo in case presets were saved/deleted in dialog
+        current = self.combo_render_preset.currentText()
+        self.combo_render_preset.blockSignals(True)
+        self.combo_render_preset.clear()
+        self.combo_render_preset.addItem("(none)")
+        self._load_preset_list()
+        idx = self.combo_render_preset.findText(current)
+        if idx >= 0:
+            self.combo_render_preset.setCurrentIndex(idx)
+        self.combo_render_preset.blockSignals(False)
+        if result == QDialog.DialogCode.Accepted:
             if self.queue.on_queue_changed:
                 self.queue.on_queue_changed()
             self._append_log(f"Updated render settings for {len(jobs)} job{'s' if len(jobs) > 1 else ''}")
