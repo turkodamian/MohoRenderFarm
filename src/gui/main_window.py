@@ -200,7 +200,11 @@ class EditSettingsDialog(QDialog):
 
         self.chk_compose_layers = QCheckBox("Auto-compose all layer comps into MP4 with ffmpeg")
         self.chk_compose_layers.setChecked(True)
-        lc_layout.addRow("", self.chk_compose_layers)
+        self.chk_compose_reverse = QCheckBox("Reverse layer order")
+        compose_row = QHBoxLayout()
+        compose_row.addWidget(self.chk_compose_layers)
+        compose_row.addWidget(self.chk_compose_reverse)
+        lc_layout.addRow("", compose_row)
 
         self.lc_group.setEnabled(False)
         self.chk_apply_layercomp.toggled.connect(self.lc_group.setEnabled)
@@ -303,6 +307,7 @@ class EditSettingsDialog(QDialog):
         _set_chk(self.chk_createfolderforlayercomp, job.createfolderforlayercomps)
         _set_chk(self.chk_addformatsuffix, job.addformatsuffix)
         self.chk_compose_layers.setChecked(job.compose_layers)
+        self.chk_compose_reverse.setChecked(job.compose_reverse_order)
 
         # QT
         if job.quality is not None:
@@ -382,6 +387,7 @@ class EditSettingsDialog(QDialog):
         self.chk_createfolderforlayercomp.setChecked(data.get("createfolderforlayercomps", False))
         self.chk_addformatsuffix.setChecked(data.get("addformatsuffix", False))
         self.chk_compose_layers.setChecked(data.get("compose_layers", False))
+        self.chk_compose_reverse.setChecked(data.get("compose_reverse_order", False))
 
         # QT options
         quality = data.get("quality", 3)
@@ -428,6 +434,7 @@ class EditSettingsDialog(QDialog):
             "createfolderforlayercomps": self.chk_createfolderforlayercomp.isChecked(),
             "addformatsuffix": self.chk_addformatsuffix.isChecked(),
             "compose_layers": self.chk_compose_layers.isChecked(),
+            "compose_reverse_order": self.chk_compose_reverse.isChecked(),
             "quality": self.combo_quality.currentData(),
             "depth": self.spin_depth.value(),
         }
@@ -515,6 +522,7 @@ class EditSettingsDialog(QDialog):
                 job.createfolderforlayercomps = self.chk_createfolderforlayercomp.isChecked()
                 job.addformatsuffix = self.chk_addformatsuffix.isChecked()
                 job.compose_layers = self.chk_compose_layers.isChecked()
+                job.compose_reverse_order = self.chk_compose_reverse.isChecked()
 
             if self.chk_apply_qt.isChecked():
                 job.quality = self.combo_quality.currentData()
@@ -901,7 +909,11 @@ class MainWindow(QMainWindow):
 
         self.chk_compose_layers = QCheckBox("Auto-compose all layer comps into MP4 with ffmpeg")
         self.chk_compose_layers.setChecked(True)
-        lc_layout.addRow("", self.chk_compose_layers)
+        self.chk_compose_reverse = QCheckBox("Reverse layer order (first alphabetically = background)")
+        compose_row = QHBoxLayout()
+        compose_row.addWidget(self.chk_compose_layers)
+        compose_row.addWidget(self.chk_compose_reverse)
+        lc_layout.addRow("", compose_row)
 
         layout.addWidget(lc_group)
 
@@ -1396,6 +1408,7 @@ class MainWindow(QMainWindow):
         job.createfolderforlayercomps = self.chk_createfolderforlayercomp.isChecked()
         job.addformatsuffix = self.chk_addformatsuffix.isChecked()
         job.compose_layers = self.chk_compose_layers.isChecked()
+        job.compose_reverse_order = self.chk_compose_reverse.isChecked()
 
         job.copy_images = self.chk_copy_images.isChecked()
 
@@ -2144,6 +2157,7 @@ class MainWindow(QMainWindow):
         self.chk_createfolderforlayercomp.setChecked(data.get("createfolderforlayercomps", False))
         self.chk_addformatsuffix.setChecked(data.get("addformatsuffix", False))
         self.chk_compose_layers.setChecked(data.get("compose_layers", False))
+        self.chk_compose_reverse.setChecked(data.get("compose_reverse_order", False))
 
         # QT options
         quality = data.get("quality", 3)
@@ -2183,6 +2197,7 @@ class MainWindow(QMainWindow):
             "createfolderforlayercomps": self.chk_createfolderforlayercomp.isChecked(),
             "addformatsuffix": self.chk_addformatsuffix.isChecked(),
             "compose_layers": self.chk_compose_layers.isChecked(),
+            "compose_reverse_order": self.chk_compose_reverse.isChecked(),
             "quality": self.combo_quality.currentData(),
             "depth": self.spin_depth.value(),
         }

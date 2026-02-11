@@ -13,12 +13,17 @@ def get_ffmpeg_path():
 
 def compose_layer_comps(output_dir: str, framerate: int = 24,
                         ffmpeg_path: str = None,
-                        on_output: Optional[Callable[[str], None]] = None) -> Optional[str]:
+                        on_output: Optional[Callable[[str], None]] = None,
+                        reverse_order: bool = False) -> Optional[str]:
     """Compose all layer comp PNG sequences into a single MP4.
 
-    Layer comp folders are sorted alphabetically:
+    Default order (alphabetical):
     - LAST alphabetically = background (bottom layer)
     - FIRST alphabetically = foreground (top layer)
+
+    Reverse order:
+    - FIRST alphabetically = background (bottom layer)
+    - LAST alphabetically = foreground (top layer)
 
     Uses ffmpeg overlay filter to composite all layers.
 
@@ -27,6 +32,7 @@ def compose_layer_comps(output_dir: str, framerate: int = 24,
         framerate: Frame rate for the output video
         ffmpeg_path: Path to ffmpeg executable (uses bundled if None)
         on_output: Callback for log messages
+        reverse_order: If True, reverse the compositing order (first alpha = background)
 
     Returns:
         Path to the composed MP4 file, or None if failed
@@ -77,10 +83,12 @@ def compose_layer_comps(output_dir: str, framerate: int = 24,
             return f"{prefix}%0{num_digits}d.png"
         return None
 
-    # Sort alphabetically: last = background, first = foreground
-    # So we reverse: background first in input list, foreground last
-    # reversed() gives us: Z (bg) first, then ..., then A (fg) last
-    layers_bg_to_fg = list(reversed(layer_folders))
+    # Default: last alphabetically = background, first = foreground
+    # Reverse: first alphabetically = background, last = foreground
+    if reverse_order:
+        layers_bg_to_fg = list(layer_folders)  # A (bg) first, Z (fg) last
+    else:
+        layers_bg_to_fg = list(reversed(layer_folders))  # Z (bg) first, A (fg) last
 
     # Build ffmpeg command
     cmd = [ffmpeg_path, "-y"]  # -y to overwrite

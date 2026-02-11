@@ -52,6 +52,7 @@ class RenderJob:
     subfolder_project: bool = False
     copy_images: bool = False
     compose_layers: bool = False
+    compose_reverse_order: bool = False
     # Runtime state
     status: str = RenderStatus.PENDING.value
     progress: float = 0.0

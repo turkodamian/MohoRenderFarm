@@ -231,7 +231,8 @@ class RenderQueue:
                     out_dir = Path(next_job.output_path).parent if next_job.output_path else Path(next_job.project_file).parent
                     if self.on_output:
                         self.on_output(f"[{next_job.id}] Starting ffmpeg layer composition...")
-                    compose_layer_comps(str(out_dir), on_output=self.on_output)
+                    compose_layer_comps(str(out_dir), on_output=self.on_output,
+                                        reverse_order=next_job.compose_reverse_order)
                 except Exception as e:
                     if self.on_output:
                         self.on_output(f"[{next_job.id}] FFmpeg compose error: {e}")
