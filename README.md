@@ -340,7 +340,6 @@ Master PC (port 5580)
 MohoRenderFarm/
 ├── main.py                 # Entry point (GUI + CLI)
 ├── start.bat               # Quick launcher (double-click to run)
-├── requirements.txt        # Python dependencies reference
 ├── python/                 # Bundled portable Python 3.10
 ├── ffmpeg/                 # Bundled FFmpeg binaries
 │   ├── ffmpeg.exe          # FFmpeg encoder

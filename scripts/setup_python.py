@@ -14,7 +14,6 @@ APP_ROOT = Path(__file__).parent.parent
 PYTHON_DIR = APP_ROOT / "python"
 PYTHON_ZIP = APP_ROOT / "python-download.zip"
 PTH_FILE = PYTHON_DIR / "python310._pth"
-REQUIREMENTS = APP_ROOT / "requirements.txt"
 
 
 def download_with_progress(url, dest):
