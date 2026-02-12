@@ -11,8 +11,10 @@ import os
 import socket
 import json
 
-# Add project root to path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Add project root and vendored dependencies to path
+_app_root = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(_app_root, "lib"))
+sys.path.insert(0, _app_root)
 
 from src.config import AppConfig
 

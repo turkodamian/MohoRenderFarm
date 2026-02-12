@@ -104,19 +104,6 @@ def setup_python():
     if getpip_path.exists():
         getpip_path.unlink()
 
-    # Install dependencies
-    if REQUIREMENTS.exists():
-        print("  Installing dependencies...")
-        result = subprocess.run(
-            [str(python_exe), "-m", "pip", "install", "-r", str(REQUIREMENTS),
-             "--no-warn-script-location"],
-            capture_output=True, text=True,
-        )
-        if result.returncode != 0:
-            print(f"  WARNING: Some dependencies failed to install:\n{result.stderr}")
-        else:
-            print("  Dependencies installed successfully.")
-
     print(f"  Portable Python {PYTHON_VERSION} installed successfully!")
     return True
 

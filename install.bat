@@ -9,7 +9,7 @@ echo.
 cd /d "%~dp0"
 
 :: Step 1: Set up portable Python
-echo [1/5] Setting up portable Python...
+echo [1/4] Setting up portable Python...
 
 if exist "%~dp0python\python.exe" (
     echo   Portable Python already installed.
@@ -64,30 +64,18 @@ set "PYTHON=%PY_DIR%\python.exe"
 echo   Portable Python installed successfully.
 
 :deps
-:: Step 2: Install dependencies
+:: Step 2: Download FFmpeg
 echo.
-echo [2/5] Installing dependencies...
-"%PYTHON%" -m pip install --upgrade pip >nul 2>&1
-"%PYTHON%" -m pip install -r "%~dp0requirements.txt" --no-warn-script-location
-if %errorlevel% neq 0 (
-    echo ERROR: Failed to install dependencies.
-    pause
-    exit /b 1
-)
-echo   Dependencies installed successfully.
-
-:: Step 3: Download FFmpeg
-echo.
-echo [3/5] Setting up FFmpeg...
+echo [2/4] Setting up FFmpeg...
 "%PYTHON%" scripts\setup_ffmpeg.py
 if %errorlevel% neq 0 (
     echo   WARNING: FFmpeg setup failed.
     echo   Layer comp auto-composition will not be available.
 )
 
-:: Step 4: Verify Moho installation
+:: Step 3: Verify Moho installation
 echo.
-echo [4/5] Checking Moho installation...
+echo [3/4] Checking Moho installation...
 if exist "C:\Program Files\Moho 14\Moho.exe" (
     echo   Found Moho 14 at C:\Program Files\Moho 14\Moho.exe
 ) else (
@@ -95,9 +83,9 @@ if exist "C:\Program Files\Moho 14\Moho.exe" (
     echo   You can configure the Moho path in the App Settings tab.
 )
 
-:: Step 5: Register context menu
+:: Step 4: Register context menu
 echo.
-echo [5/5] Windows integration...
+echo [4/4] Windows integration...
 set /p REGISTER="Register right-click context menu for .moho files? (Y/N): "
 if /i "%REGISTER%"=="Y" (
     "%PYTHON%" main.py --register-context-menu

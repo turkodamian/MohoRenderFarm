@@ -56,11 +56,11 @@ Created by **Damián Turkieh**
 git clone https://github.com/turkodamian/MohoRenderFarm.git
 cd MohoRenderFarm
 
-# 2. Run the installer (sets up portable Python, dependencies, and FFmpeg)
+# 2. Run the installer (sets up portable Python and FFmpeg)
 install.bat
 ```
 
-The installer automatically downloads a portable Python environment — no system Python installation required. If system Python is available, it will be used to bootstrap the portable copy.
+All Python dependencies (PyQt6, Flask, requests) are bundled in the `lib/` folder — no pip install needed. The installer only downloads a portable Python interpreter and FFmpeg.
 
 ### Launch
 
@@ -345,6 +345,7 @@ MohoRenderFarm/
 ├── start.bat               # Quick launcher
 ├── install.bat             # Installer
 ├── requirements.txt        # Python dependencies
+├── lib/                    # Vendored Python dependencies (PyQt6, Flask, etc.)
 ├── scripts/
 │   ├── setup_python.py     # Portable Python auto-downloader
 │   └── setup_ffmpeg.py     # FFmpeg auto-downloader
@@ -379,7 +380,7 @@ MohoRenderFarm/
 - **Windows** (tested on Windows 10/11)
 - **Python** 3.10+ (auto-installed as portable by `install.bat`, or use system Python)
 - **FFmpeg** - Auto-downloaded by installer (used for layer comp composition)
-- **Dependencies**: PyQt6, Flask, requests (installed automatically)
+- **Dependencies**: PyQt6, Flask, requests (bundled in `lib/`, no install needed)
 
 ---
 
