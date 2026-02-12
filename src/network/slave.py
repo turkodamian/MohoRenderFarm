@@ -209,6 +209,20 @@ class SlaveClient:
         with self._lock:
             self._active_renders.pop(worker_id, None)
 
+        # Post-render: auto-compose layer comps with ffmpeg
+        if (job.status == RenderStatus.COMPLETED.value
+                and job.compose_layers and job.layercomp):
+            try:
+                from src.ffmpeg_compose import compose_layer_comps
+                out_dir = Path(job.output_path).parent if job.output_path else Path(job.project_file).parent
+                if self.on_output:
+                    self.on_output(f"Worker {worker_id}: Starting ffmpeg layer composition...")
+                compose_layer_comps(str(out_dir), on_output=self.on_output,
+                                    reverse_order=job.compose_reverse_order)
+            except Exception as e:
+                if self.on_output:
+                    self.on_output(f"Worker {worker_id}: FFmpeg compose error: {e}")
+
         # Report completion
         self._report_completion(job)
 

@@ -398,6 +398,10 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 
 ## Changelog
 
+### v1.4.9
+- **Farm Queue Output Column** - New clickable Output column in the Farm Job Queue table, click to open the output folder in Windows Explorer
+- **FFmpeg Compose on Farm Slaves** - Layer comp auto-composition with FFmpeg now works on remote slave machines (previously only worked on master/local renders)
+
 ### v1.4.8
 - **Stop Rendering Farm Jobs** - Right-click context menu on actively rendering farm jobs now includes "Stop Rendering" to cancel them remotely via the master-slave heartbeat channel
 - **Extra-smooth Images Default** - The "Extra-smooth images" checkbox is now enabled by default

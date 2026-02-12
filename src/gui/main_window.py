@@ -1316,9 +1316,9 @@ class MainWindow(QMainWindow):
         farm_queue_layout.setContentsMargins(0, 0, 0, 0)
         farm_queue_layout.addWidget(QLabel("Farm Job Queue"))
         self.farm_queue_table = QTableWidget()
-        self.farm_queue_table.setColumnCount(7)
+        self.farm_queue_table.setColumnCount(8)
         self.farm_queue_table.setHorizontalHeaderLabels([
-            "Status", "Project", "Format", "Assigned Slave", "Progress", "Time", "ID"
+            "Status", "Project", "Format", "Assigned Slave", "Progress", "Time", "Output", "ID"
         ])
         self.farm_queue_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.farm_queue_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -1326,6 +1326,7 @@ class MainWindow(QMainWindow):
         self.farm_queue_table.verticalHeader().setVisible(False)
         self.farm_queue_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.farm_queue_table.customContextMenuRequested.connect(self._show_farm_queue_context_menu)
+        self.farm_queue_table.cellClicked.connect(self._on_farm_queue_cell_clicked)
         farm_queue_layout.addWidget(self.farm_queue_table)
         farm_splitter.addWidget(farm_queue_widget)
 
@@ -2676,7 +2677,16 @@ class MainWindow(QMainWindow):
             self.farm_queue_table.setItem(row, 3, QTableWidgetItem(job.assigned_slave or "-"))
             self.farm_queue_table.setItem(row, 4, QTableWidgetItem(f"{job.progress:.0f}%"))
             self.farm_queue_table.setItem(row, 5, QTableWidgetItem(job.elapsed_str))
-            self.farm_queue_table.setItem(row, 6, QTableWidgetItem(job.id))
+            # Output column: show folder name, clickable
+            out_text = ""
+            if job.output_path:
+                out_text = os.path.basename(os.path.dirname(job.output_path)) or os.path.dirname(job.output_path)
+            elif job.project_file:
+                out_text = os.path.basename(os.path.dirname(job.project_file))
+            out_item = QTableWidgetItem(out_text)
+            out_item.setForeground(QColor("#89b4fa"))
+            self.farm_queue_table.setItem(row, 6, out_item)
+            self.farm_queue_table.setItem(row, 7, QTableWidgetItem(job.id))
 
             if job.elapsed_time > 0 and job.status in (RenderStatus.COMPLETED.value, RenderStatus.FAILED.value):
                 total_time += job.elapsed_time
@@ -2899,7 +2909,7 @@ class MainWindow(QMainWindow):
         if row < 0 or not self.master_server:
             return
         status_item = self.farm_queue_table.item(row, 0)
-        id_item = self.farm_queue_table.item(row, 6)
+        id_item = self.farm_queue_table.item(row, 7)
         if not status_item or not id_item:
             return
         status = status_item.text()
@@ -2966,6 +2976,35 @@ class MainWindow(QMainWindow):
         job = self.master_server.request_job_cancellation(job_id)
         if job:
             self._append_farm_log(f"[GUI] Stop requested for: {job.project_name} [{job_id}]")
+
+    def _on_farm_queue_cell_clicked(self, row, col):
+        """Handle clicks on Output (col 6) to open Explorer for farm jobs."""
+        if col != 6 or row < 0 or not self.master_server:
+            return
+        id_item = self.farm_queue_table.item(row, 7)
+        if not id_item:
+            return
+        job_id = id_item.text()
+        # Find job in master server
+        all_jobs = self.master_server.get_all_farm_jobs()
+        job = None
+        for group in all_jobs.values():
+            for j in group:
+                if j.id == job_id:
+                    job = j
+                    break
+            if job:
+                break
+        if not job:
+            return
+        if job.output_path:
+            p = Path(job.output_path)
+            if p.suffix:
+                self._open_in_explorer(str(p) if p.exists() else str(p.parent))
+            else:
+                self._open_in_explorer(str(p))
+        else:
+            self._open_in_explorer(os.path.dirname(job.project_file))
 
     def _return_farm_job_to_local(self, job_id):
         """Remove a job from the farm and add it back to the local queue."""
