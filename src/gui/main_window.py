@@ -1271,7 +1271,7 @@ class MainWindow(QMainWindow):
         self.slaves_table.setHorizontalHeaderLabels([
             "Hostname", "IP:Port", "Status", "Current Job", "Completed", "Failed"
         ])
-        self.slaves_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.slaves_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self.slaves_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.slaves_table.setAlternatingRowColors(True)
         self.slaves_table.verticalHeader().setVisible(False)
