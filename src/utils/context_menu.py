@@ -16,7 +16,11 @@ def get_app_path():
 
 
 def get_python_path():
-    """Get the Python executable path."""
+    """Get the Python executable path (windowless version)."""
+    exe_dir = os.path.dirname(sys.executable)
+    pythonw = os.path.join(exe_dir, "pythonw.exe")
+    if os.path.exists(pythonw):
+        return pythonw
     return sys.executable
 
 
