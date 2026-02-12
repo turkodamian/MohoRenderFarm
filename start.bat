@@ -1,22 +1,28 @@
 @echo off
 title Moho Render Farm
 echo ============================================
-echo   Moho Render Farm v1.3.2
-echo   by Damian Turkieh
+echo   Moho Render Farm v1.3.3
+echo   by Damián Turkieh
 echo ============================================
 echo.
 
-:: Find Python
+:: Check for portable Python first, then system Python
+if exist "%~dp0python\python.exe" (
+    set "PYTHON=%~dp0python\python.exe"
+    goto :launch
+)
+
 where python >nul 2>&1
 if %errorlevel% neq 0 (
-    echo ERROR: Python not found. Please install Python 3.10+ and add it to PATH.
+    echo ERROR: Python not found. Run install.bat first to set up portable Python.
     pause
     exit /b 1
 )
+set "PYTHON=python"
 
-:: Launch the application
+:launch
 cd /d "%~dp0"
-python main.py %*
+"%PYTHON%" main.py %*
 
 if %errorlevel% neq 0 (
     echo.

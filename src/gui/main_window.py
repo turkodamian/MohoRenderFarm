@@ -544,6 +544,7 @@ class MainWindow(QMainWindow):
     farm_log_signal = pyqtSignal(str)  # farm-specific log messages
     farm_queue_changed_signal = pyqtSignal()  # farm queue needs refresh
     find_master_signal = pyqtSignal(str)  # found master IP or empty string
+    update_check_signal = pyqtSignal(str)  # new version or empty string
 
     def __init__(self, config: AppConfig, initial_files=None, add_to_queue_files=None):
         super().__init__()
@@ -585,6 +586,9 @@ class MainWindow(QMainWindow):
         elif add_to_queue_files:
             for f in add_to_queue_files:
                 self._add_file_to_queue(f)
+
+        # Check for updates after a short delay
+        QTimer.singleShot(3000, self._check_update_on_startup)
 
     def _setup_ui(self):
         self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
@@ -1149,11 +1153,35 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(ctx_group)
 
+        # Updates
+        update_group = QGroupBox("Updates")
+        update_layout = QVBoxLayout(update_group)
+
+        self.chk_auto_updates = QCheckBox("Automatically check and install updates on startup")
+        self.chk_auto_updates.setChecked(self.config.get("auto_check_updates", True))
+        self.chk_auto_updates.stateChanged.connect(
+            lambda state: self.config.set("auto_check_updates", state == Qt.CheckState.Checked.value))
+        update_layout.addWidget(self.chk_auto_updates)
+
+        update_row = QHBoxLayout()
+        self.btn_check_update = QPushButton("Check for Updates")
+        self.btn_check_update.setObjectName("primaryBtn")
+        self.btn_check_update.clicked.connect(self._check_for_update)
+        update_row.addWidget(self.btn_check_update)
+        self.lbl_update_status = QLabel("")
+        self.lbl_update_status.setStyleSheet("color: #a6adc8;")
+        update_row.addWidget(self.lbl_update_status)
+        update_row.addStretch()
+        update_layout.addLayout(update_row)
+
+        layout.addWidget(update_group)
+
         # About
         about_group = QGroupBox("About")
         about_layout = QVBoxLayout(about_group)
         about_layout.addWidget(QLabel(f"{APP_NAME} v{APP_VERSION}"))
         about_layout.addWidget(QLabel(f"Created by {APP_AUTHOR}"))
+        about_layout.addWidget(QLabel("Contact: damian@realidad360.com.ar"))
         about_layout.addWidget(QLabel("Batch rendering tool for Moho Animation v14"))
         layout.addWidget(about_group)
 
@@ -1170,6 +1198,7 @@ class MainWindow(QMainWindow):
         self.farm_log_signal.connect(self._append_farm_log)
         self.farm_queue_changed_signal.connect(self._refresh_farm_queue_table)
         self.find_master_signal.connect(self._on_master_found)
+        self.update_check_signal.connect(self._on_update_result)
 
         # Queue controls
         self.btn_add_files.clicked.connect(self._add_files)
@@ -1258,6 +1287,31 @@ class MainWindow(QMainWindow):
         act_clear_done = QAction("Clear Completed", self)
         act_clear_done.triggered.connect(self.queue.clear_completed)
         queue_menu.addAction(act_clear_done)
+
+        # Help menu
+        help_menu = menubar.addMenu("Help")
+
+        act_docs = QAction("Documentation", self)
+        act_docs.triggered.connect(lambda: __import__("webbrowser").open(
+            "https://github.com/turkodamian/MohoRenderFarm#readme"))
+        help_menu.addAction(act_docs)
+
+        act_bug = QAction("Report a Bug", self)
+        act_bug.triggered.connect(lambda: __import__("webbrowser").open(
+            "https://github.com/turkodamian/MohoRenderFarm/issues/new"))
+        help_menu.addAction(act_bug)
+
+        help_menu.addSeparator()
+
+        act_check_update = QAction("Check for Updates", self)
+        act_check_update.triggered.connect(self._check_for_update)
+        help_menu.addAction(act_check_update)
+
+        help_menu.addSeparator()
+
+        act_about = QAction("About", self)
+        act_about.triggered.connect(self._show_about)
+        help_menu.addAction(act_about)
 
     # --- Signal emitters (called from worker threads) ---
     def _emit_log(self, msg):
@@ -1919,6 +1973,51 @@ class MainWindow(QMainWindow):
             self.farm_log_signal.emit("[GUI] No master found on local network")
             self.lbl_farm_status.setText("No master found")
             self.lbl_farm_status.setStyleSheet("color: #f38ba8; font-weight: bold;")
+
+    def _check_for_update(self):
+        """Check for app updates from GitHub."""
+        self.btn_check_update.setEnabled(False)
+        self.lbl_update_status.setText("Checking for updates...")
+        self.lbl_update_status.setStyleSheet("color: #89b4fa;")
+        import threading
+        threading.Thread(target=self._do_update_check, daemon=True).start()
+
+    def _do_update_check(self):
+        """Background thread: check for update and auto-install if found."""
+        from src.updater import check_for_update, download_and_install_update
+        new_version = check_for_update(APP_VERSION)
+        if new_version:
+            download_and_install_update(
+                on_progress=lambda msg: self.log_signal.emit(msg))
+        self.update_check_signal.emit(new_version or "")
+
+    def _on_update_result(self, version):
+        """Handle update check result (GUI thread)."""
+        self.btn_check_update.setEnabled(True)
+        if version:
+            self.lbl_update_status.setText(f"Updated to v{version} — restart to apply")
+            self.lbl_update_status.setStyleSheet("color: #a6e3a1; font-weight: bold;")
+            QMessageBox.information(self, "Update Installed",
+                                   f"Moho Render Farm has been updated to v{version}.\n\n"
+                                   "Please restart the application to apply the update.")
+        else:
+            self.lbl_update_status.setText("You are up to date")
+            self.lbl_update_status.setStyleSheet("color: #a6adc8;")
+
+    def _check_update_on_startup(self):
+        """Silently check for updates on startup."""
+        if self.config.get("auto_check_updates", True):
+            import threading
+            threading.Thread(target=self._do_update_check, daemon=True).start()
+
+    def _show_about(self):
+        """Show About dialog."""
+        QMessageBox.about(
+            self, "About Moho Render Farm",
+            f"{APP_NAME} v{APP_VERSION}\n\n"
+            f"by {APP_AUTHOR}\n"
+            f"damian@realidad360.com.ar\n\n"
+            f"Batch rendering tool for Moho Animation v14")
 
     def _start_slave(self):
         from src.network.slave import SlaveClient

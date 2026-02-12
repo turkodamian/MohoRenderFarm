@@ -2,7 +2,7 @@
 
 A comprehensive render farm and batch rendering application for **Moho Animation v14**.
 
-Created by **Damian Turkieh**
+Created by **Damián Turkieh**
 
 ---
 
@@ -22,6 +22,8 @@ Created by **Damian Turkieh**
 - **FFmpeg Layer Composition** - Auto-compose layer comp PNG sequences into MP4 after rendering
 - **Project Subfolder Output** - Automatically create subfolders named after each project
 - **Images Copy** - Copy `\Images` media to project root to fix offline media references
+- **Portable Python** - Bundled embeddable Python, no system Python required
+- **Auto-Update** - Automatic update checking and installation from GitHub
 - **Windows Integration** - Right-click context menu on .moho files to render or add to queue
 - **Drag & Drop** - Drag .moho files directly onto the application window
 - **Edit Queue Settings** - Modify render settings for one or multiple queued jobs simultaneously
@@ -54,13 +56,11 @@ Created by **Damian Turkieh**
 git clone https://github.com/turkodamian/MohoRenderFarm.git
 cd MohoRenderFarm
 
-# 2. Run the installer
+# 2. Run the installer (sets up portable Python, dependencies, and FFmpeg)
 install.bat
-
-# Or install manually:
-python -m pip install -r requirements.txt
-python setup_ffmpeg.py
 ```
+
+The installer automatically downloads a portable Python environment — no system Python installation required. If system Python is available, it will be used to bootstrap the portable copy.
 
 ### Launch
 
@@ -142,6 +142,14 @@ Set up distributed rendering across multiple PCs:
 - **Max Simultaneous Renders** - Number of concurrent renders (1-16), applies to both local queue and slave mode
 - **Default Output Folder** - Set a custom default output folder or use project folder as default
 - **Windows Integration** - Register/unregister right-click context menu for .moho files
+- **Updates** - Toggle automatic update checks, manually check for updates
+- **About** - App version, author, and contact info
+
+### Help Menu
+- **Documentation** - Opens the GitHub README in your browser
+- **Report a Bug** - Opens the GitHub Issues page to submit a bug report
+- **Check for Updates** - Manually check for and install the latest version
+- **About** - Application info dialog
 
 ---
 
@@ -337,12 +345,15 @@ MohoRenderFarm/
 ├── start.bat               # Quick launcher
 ├── install.bat             # Installer
 ├── requirements.txt        # Python dependencies
+├── setup_python.py         # Portable Python auto-downloader
 ├── setup_ffmpeg.py         # FFmpeg auto-downloader
+├── python/                 # Portable Python (auto-downloaded)
 ├── ffmpeg/                 # FFmpeg binaries (auto-downloaded)
 │   ├── ffmpeg.exe          # FFmpeg encoder
 │   └── ffprobe.exe         # FFmpeg probe
 ├── src/
 │   ├── config.py           # App configuration
+│   ├── updater.py          # Auto-update from GitHub
 │   ├── moho_renderer.py    # Moho CLI wrapper engine
 │   ├── render_queue.py     # Queue management
 │   ├── ffmpeg_compose.py   # FFmpeg layer comp compositor
@@ -363,11 +374,11 @@ MohoRenderFarm/
 
 ## Requirements
 
-- **Python** 3.10 or higher
 - **Moho Pro 14** (or compatible version)
 - **Windows** (tested on Windows 10/11)
+- **Python** 3.10+ (auto-installed as portable by `install.bat`, or use system Python)
 - **FFmpeg** - Auto-downloaded by installer (used for layer comp composition)
-- **Dependencies**: PyQt6, Flask, requests (installed via `install.bat` or `pip`)
+- **Dependencies**: PyQt6, Flask, requests (installed automatically)
 
 ---
 
@@ -388,6 +399,12 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 ---
 
 ## Changelog
+
+### v1.3.3
+- **Portable Python** - Installer now downloads and bundles Python 3.10 embeddable, no system Python required
+- **Auto-Update** - Checks GitHub for new versions on startup, auto-downloads and installs updates; toggle in App Settings
+- **Help Menu** - New menu with Documentation, Report a Bug, Check for Updates, and About
+- **About Contact** - Added contact email (damian@realidad360.com.ar) to About section in App Settings
 
 ### v1.3.2
 - **Find Master** - Auto-discover master server on the local network with one click, scans all IPs on the subnet in parallel
@@ -446,4 +463,4 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 
 ## License
 
-This project is proprietary software created by Damian Turkieh.
+This project is proprietary software created by Damián Turkieh.
