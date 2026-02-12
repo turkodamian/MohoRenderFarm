@@ -141,6 +141,7 @@ Set up distributed rendering across multiple PCs:
 - **Max Simultaneous Renders** - Number of concurrent renders (1-16), applies to both local queue and slave mode
 - **Default Output Folder** - Set a custom default output folder or use project folder as default
 - **Windows Integration** - Register/unregister right-click context menu for .moho files
+- **Shortcuts & Startup** - Add desktop shortcut, Start Menu entry, taskbar pin, and auto-start on Windows boot
 - **Updates** - Toggle automatic update checks, manually check for updates
 - **About** - App version, author, and contact info
 
@@ -396,6 +397,13 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 ---
 
 ## Changelog
+
+### v1.4.4
+- **Desktop Shortcut** - Add or remove a desktop shortcut from App Settings
+- **Start Menu Shortcut** - Add or remove the app from the Windows Start Menu
+- **Taskbar Pin** - Pin or unpin the app to the Windows taskbar
+- **Run on Startup** - Enable or disable automatic launch when Windows starts
+- All shortcut buttons are toggle-style: they detect current state and show Add/Remove accordingly
 
 ### v1.4.3
 - **Auto-save & Restore Queue** - The render queue is automatically saved on every change (add, remove, edit, reorder). On startup, the previous session's queue is restored automatically, protecting against crashes or accidental closures

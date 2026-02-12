@@ -1437,6 +1437,27 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(ctx_group)
 
+        # Shortcuts & Startup
+        shortcut_group = QGroupBox("Shortcuts & Startup")
+        shortcut_layout = QVBoxLayout(shortcut_group)
+
+        shortcut_btns = QGridLayout()
+        self.btn_desktop_shortcut = QPushButton("Add Desktop Shortcut")
+        self.btn_desktop_shortcut.setObjectName("primaryBtn")
+        self.btn_startmenu_shortcut = QPushButton("Add to Start Menu")
+        self.btn_startmenu_shortcut.setObjectName("primaryBtn")
+        self.btn_taskbar_shortcut = QPushButton("Pin to Taskbar")
+        self.btn_taskbar_shortcut.setObjectName("primaryBtn")
+        self.btn_startup_entry = QPushButton("Run on Startup")
+        self.btn_startup_entry.setObjectName("primaryBtn")
+        shortcut_btns.addWidget(self.btn_desktop_shortcut, 0, 0)
+        shortcut_btns.addWidget(self.btn_startmenu_shortcut, 0, 1)
+        shortcut_btns.addWidget(self.btn_taskbar_shortcut, 0, 2)
+        shortcut_btns.addWidget(self.btn_startup_entry, 0, 3)
+        shortcut_layout.addLayout(shortcut_btns)
+
+        layout.addWidget(shortcut_group)
+
         # Updates
         update_group = QGroupBox("Updates")
         update_layout = QVBoxLayout(update_group)
@@ -1524,6 +1545,11 @@ class MainWindow(QMainWindow):
         # Settings
         self.btn_register_ctx.clicked.connect(self._register_context_menu)
         self.btn_unregister_ctx.clicked.connect(self._unregister_context_menu)
+        self.btn_desktop_shortcut.clicked.connect(self._toggle_desktop_shortcut)
+        self.btn_startmenu_shortcut.clicked.connect(self._toggle_startmenu_shortcut)
+        self.btn_taskbar_shortcut.clicked.connect(self._toggle_taskbar_shortcut)
+        self.btn_startup_entry.clicked.connect(self._toggle_startup_entry)
+        self._refresh_shortcut_buttons()
 
         # Keyboard shortcuts (Delete is handled by QAction in menu to avoid ambiguity)
         QShortcut(QKeySequence(Qt.Key.Key_Escape), self, self._stop_queue)
@@ -2208,6 +2234,99 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Success", "Context menu entries removed.")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error: {e}")
+
+    # --- Shortcuts & Startup ---
+    def _refresh_shortcut_buttons(self):
+        """Update shortcut button text based on current state."""
+        from src.utils.shortcuts import (
+            has_desktop_shortcut, has_start_menu_shortcut,
+            has_taskbar_shortcut, has_startup_entry,
+        )
+        if has_desktop_shortcut():
+            self.btn_desktop_shortcut.setText("Remove Desktop Shortcut")
+            self.btn_desktop_shortcut.setObjectName("dangerBtn")
+        else:
+            self.btn_desktop_shortcut.setText("Add Desktop Shortcut")
+            self.btn_desktop_shortcut.setObjectName("primaryBtn")
+        if has_start_menu_shortcut():
+            self.btn_startmenu_shortcut.setText("Remove from Start Menu")
+            self.btn_startmenu_shortcut.setObjectName("dangerBtn")
+        else:
+            self.btn_startmenu_shortcut.setText("Add to Start Menu")
+            self.btn_startmenu_shortcut.setObjectName("primaryBtn")
+        if has_taskbar_shortcut():
+            self.btn_taskbar_shortcut.setText("Unpin from Taskbar")
+            self.btn_taskbar_shortcut.setObjectName("dangerBtn")
+        else:
+            self.btn_taskbar_shortcut.setText("Pin to Taskbar")
+            self.btn_taskbar_shortcut.setObjectName("primaryBtn")
+        if has_startup_entry():
+            self.btn_startup_entry.setText("Disable Run on Startup")
+            self.btn_startup_entry.setObjectName("dangerBtn")
+        else:
+            self.btn_startup_entry.setText("Run on Startup")
+            self.btn_startup_entry.setObjectName("primaryBtn")
+        # Force style refresh
+        for btn in (self.btn_desktop_shortcut, self.btn_startmenu_shortcut,
+                     self.btn_taskbar_shortcut, self.btn_startup_entry):
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
+
+    def _toggle_desktop_shortcut(self):
+        from src.utils.shortcuts import has_desktop_shortcut, add_desktop_shortcut, remove_desktop_shortcut
+        if has_desktop_shortcut():
+            if remove_desktop_shortcut():
+                self._append_log("Desktop shortcut removed")
+            else:
+                QMessageBox.warning(self, "Error", "Failed to remove desktop shortcut.")
+        else:
+            if add_desktop_shortcut():
+                self._append_log("Desktop shortcut created")
+            else:
+                QMessageBox.warning(self, "Error", "Failed to create desktop shortcut.")
+        self._refresh_shortcut_buttons()
+
+    def _toggle_startmenu_shortcut(self):
+        from src.utils.shortcuts import has_start_menu_shortcut, add_start_menu_shortcut, remove_start_menu_shortcut
+        if has_start_menu_shortcut():
+            if remove_start_menu_shortcut():
+                self._append_log("Start Menu shortcut removed")
+            else:
+                QMessageBox.warning(self, "Error", "Failed to remove Start Menu shortcut.")
+        else:
+            if add_start_menu_shortcut():
+                self._append_log("Start Menu shortcut created")
+            else:
+                QMessageBox.warning(self, "Error", "Failed to create Start Menu shortcut.")
+        self._refresh_shortcut_buttons()
+
+    def _toggle_taskbar_shortcut(self):
+        from src.utils.shortcuts import has_taskbar_shortcut, add_taskbar_shortcut, remove_taskbar_shortcut
+        if has_taskbar_shortcut():
+            if remove_taskbar_shortcut():
+                self._append_log("Taskbar shortcut removed")
+            else:
+                QMessageBox.warning(self, "Error", "Failed to remove taskbar shortcut.")
+        else:
+            if add_taskbar_shortcut():
+                self._append_log("Taskbar shortcut created")
+            else:
+                QMessageBox.warning(self, "Error", "Failed to create taskbar shortcut.")
+        self._refresh_shortcut_buttons()
+
+    def _toggle_startup_entry(self):
+        from src.utils.shortcuts import has_startup_entry, add_startup_entry, remove_startup_entry
+        if has_startup_entry():
+            if remove_startup_entry():
+                self._append_log("Removed from Windows startup")
+            else:
+                QMessageBox.warning(self, "Error", "Failed to remove startup entry.")
+        else:
+            if add_startup_entry():
+                self._append_log("Added to Windows startup")
+            else:
+                QMessageBox.warning(self, "Error", "Failed to add startup entry.")
+        self._refresh_shortcut_buttons()
 
     # --- Network / Farm ---
     def _start_master(self):
