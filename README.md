@@ -395,14 +395,12 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 
 ## Changelog
 
-### v1.3.9
+### v1.4.0
 - **Slave Job Submission** - Slaves can now submit render jobs to the master, not just receive them
 - **Farm Tab Buttons** - "Add Jobs to Farm" and "Add Folder to Farm" buttons for submitting jobs directly from any machine
 - **Send to Farm from Slave** - "Send to Farm" and "Send All to Farm" buttons now work when connected as slave
-
-### v1.3.8
-- **Fixed Auto-Update on Windows** - Update now uses a staged approach: downloads to a staging directory, then applies the update via a batch script after the app exits, avoiding "Access Denied" errors from locked DLLs
-- **Update Error Handling** - Update dialog now correctly shows failure status instead of misleading "Update Installed" message
+- **Fixed Auto-Update** - Staged update via batch script avoids "Access Denied" errors from locked DLLs; PID-based process wait with hidden window prevents hangs
+- **Update Confirmation** - Auto-update now asks the user before downloading instead of downloading silently
 
 ### v1.3.5
 - **Bug Report via Discord** - In-app bug report dialog sends directly to Discord with name, email, log, and screenshot attachment
