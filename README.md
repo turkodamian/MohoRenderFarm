@@ -461,6 +461,16 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 
 ---
 
+## Support
+
+If you find this project useful, consider supporting its development:
+
+[Donate via PayPal](https://www.paypal.me/realidad360)
+
+---
+
 ## License
 
-This project is proprietary software created by Damián Turkieh.
+Copyright (c) 2025 Damián Turkieh
+
+This project is licensed under the [GNU General Public License v3.0](LICENSE). You are free to use, modify, and distribute this software under the terms of the GPL v3.
