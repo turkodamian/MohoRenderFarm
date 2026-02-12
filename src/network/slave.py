@@ -200,3 +200,31 @@ class SlaveClient:
                 count = len(self._active_renders)
             status = f"rendering ({count} active)" if count > 0 else "idle"
             self.on_status_changed(status)
+
+    def submit_job(self, job: RenderJob) -> bool:
+        """Submit a job to the master for rendering by the farm.
+
+        Returns True if the master accepted the job.
+        """
+        try:
+            resp = requests.post(
+                f"{self.master_url}/api/add_job",
+                json=job.to_dict(),
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                if self.on_output:
+                    self.on_output(f"Submitted job to master: {job.project_name}")
+                return True
+            else:
+                if self.on_output:
+                    self.on_output(f"Master rejected job: HTTP {resp.status_code}")
+                return False
+        except requests.ConnectionError:
+            if self.on_output:
+                self.on_output("Cannot submit job: not connected to master")
+            return False
+        except Exception as e:
+            if self.on_output:
+                self.on_output(f"Error submitting job: {e}")
+            return False

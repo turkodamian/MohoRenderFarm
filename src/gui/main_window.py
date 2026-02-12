@@ -1302,6 +1302,24 @@ class MainWindow(QMainWindow):
         farm_splitter.setSizes([400, 600])
         layout.addWidget(farm_splitter)
 
+        # Farm queue controls
+        farm_controls = QHBoxLayout()
+        self.btn_add_jobs_to_farm = QPushButton("Add Jobs to Farm")
+        self.btn_add_jobs_to_farm.setObjectName("primaryBtn")
+        self.btn_add_jobs_to_farm.setToolTip("Add .moho files directly to the farm queue")
+        self.btn_add_jobs_to_farm.clicked.connect(self._add_jobs_to_farm)
+        farm_controls.addWidget(self.btn_add_jobs_to_farm)
+        self.btn_add_folder_to_farm = QPushButton("Add Folder to Farm")
+        self.btn_add_folder_to_farm.setToolTip("Add all .moho files from a folder to the farm queue")
+        self.btn_add_folder_to_farm.clicked.connect(self._add_folder_to_farm)
+        farm_controls.addWidget(self.btn_add_folder_to_farm)
+        self.btn_clear_completed_farm = QPushButton("Clear Completed")
+        self.btn_clear_completed_farm.setToolTip("Clear completed jobs from the farm queue")
+        self.btn_clear_completed_farm.clicked.connect(self._clear_completed_farm_jobs)
+        farm_controls.addWidget(self.btn_clear_completed_farm)
+        farm_controls.addStretch()
+        layout.addLayout(farm_controls)
+
         # Farm stats bar
         stats_layout = QHBoxLayout()
         self.lbl_farm_stats = QLabel("Farm: not running")
@@ -1737,6 +1755,9 @@ class MainWindow(QMainWindow):
         if self.chk_auto_send_farm.isChecked() and self.master_server:
             self.master_server.add_job(job)
             self._append_farm_log(f"[GUI] Auto-sent to farm: {Path(filepath).name}")
+        elif self.chk_auto_send_farm.isChecked() and self.slave_client:
+            self.slave_client.submit_job(job)
+            self._append_farm_log(f"[SLAVE] Submitted to master: {Path(filepath).name}")
         else:
             self.queue.add_job(job)
             self._append_log(f"Added to queue: {Path(filepath).name}")
@@ -2464,9 +2485,9 @@ class MainWindow(QMainWindow):
     # --- Farm: Send to Farm ---
     def _send_selected_to_farm(self):
         """Send selected pending jobs from local queue to the farm."""
-        if not self.master_server:
+        if not self.master_server and not self.slave_client:
             QMessageBox.warning(self, "Farm Not Running",
-                                "Start the master server first before sending jobs to the farm.")
+                                "Start the master or slave first before sending jobs to the farm.")
             return
         selected_rows = sorted(set(idx.row() for idx in self.queue_table.selectedIndexes()))
         if not selected_rows:
@@ -2477,7 +2498,11 @@ class MainWindow(QMainWindow):
             if row < len(self.queue.jobs):
                 job = self.queue.jobs[row]
                 if job.status == RenderStatus.PENDING.value:
-                    self.master_server.add_job(RenderJob.from_dict(job.to_dict()))
+                    farm_job = RenderJob.from_dict(job.to_dict())
+                    if self.master_server:
+                        self.master_server.add_job(farm_job)
+                    elif self.slave_client:
+                        self.slave_client.submit_job(farm_job)
                     self.queue.remove_job(job.id)
                     sent += 1
         if sent:
@@ -2485,27 +2510,82 @@ class MainWindow(QMainWindow):
 
     def _send_all_to_farm(self):
         """Send all pending local queue jobs to the farm."""
-        if not self.master_server:
+        if not self.master_server and not self.slave_client:
             QMessageBox.warning(self, "Farm Not Running",
-                                "Start the master server first before sending jobs to the farm.")
+                                "Start the master or slave first before sending jobs to the farm.")
             return
         pending = self.queue.get_pending_jobs()
         if not pending:
             QMessageBox.information(self, "No Pending Jobs", "No pending jobs in the local queue.")
             return
         for job in list(pending):
-            self.master_server.add_job(RenderJob.from_dict(job.to_dict()))
+            farm_job = RenderJob.from_dict(job.to_dict())
+            if self.master_server:
+                self.master_server.add_job(farm_job)
+            elif self.slave_client:
+                self.slave_client.submit_job(farm_job)
             self.queue.remove_job(job.id)
         self._append_farm_log(f"[GUI] Sent {len(pending)} job{'s' if len(pending) > 1 else ''} to farm queue")
 
     def _send_jobs_to_farm(self, jobs):
         """Send specific jobs to the farm (from context menu)."""
-        if not self.master_server:
+        if not self.master_server and not self.slave_client:
             return
         for job in list(jobs):
-            self.master_server.add_job(RenderJob.from_dict(job.to_dict()))
+            farm_job = RenderJob.from_dict(job.to_dict())
+            if self.master_server:
+                self.master_server.add_job(farm_job)
+            elif self.slave_client:
+                self.slave_client.submit_job(farm_job)
             self.queue.remove_job(job.id)
         self._append_farm_log(f"[GUI] Sent {len(jobs)} job{'s' if len(jobs) > 1 else ''} to farm queue")
+
+    def _submit_job_to_farm(self, job):
+        """Submit a single job to the farm via master or slave."""
+        if self.master_server:
+            self.master_server.add_job(job)
+        elif self.slave_client:
+            self.slave_client.submit_job(job)
+
+    def _add_jobs_to_farm(self):
+        """Open file dialog and submit selected .moho files directly to the farm."""
+        if not self.master_server and not self.slave_client:
+            QMessageBox.warning(self, "Farm Not Running",
+                                "Start the master or slave first before adding jobs to the farm.")
+            return
+        files, _ = QFileDialog.getOpenFileNames(
+            self, "Select Moho Projects for Farm", "",
+            "Moho Projects (*.moho *.anime *.anme);;All Files (*)"
+        )
+        for f in files:
+            job = self._create_job_from_settings(f)
+            self._submit_job_to_farm(job)
+            self.config.add_recent_project(f)
+        if files:
+            self._append_farm_log(f"[GUI] Added {len(files)} job{'s' if len(files) > 1 else ''} to farm queue")
+
+    def _add_folder_to_farm(self):
+        """Open folder dialog and submit all .moho files to the farm."""
+        if not self.master_server and not self.slave_client:
+            QMessageBox.warning(self, "Farm Not Running",
+                                "Start the master or slave first before adding jobs to the farm.")
+            return
+        folder = QFileDialog.getExistingDirectory(self, "Select Folder with Moho Projects for Farm")
+        if folder:
+            count = 0
+            for root, dirs, files_list in os.walk(folder):
+                for f in files_list:
+                    ext = Path(f).suffix.lower()
+                    if ext in MOHO_FILE_EXTENSIONS:
+                        filepath = os.path.join(root, f)
+                        job = self._create_job_from_settings(filepath)
+                        self._submit_job_to_farm(job)
+                        self.config.add_recent_project(filepath)
+                        count += 1
+            if count == 0:
+                QMessageBox.information(self, "No Projects", "No Moho project files found in the selected folder.")
+            else:
+                self._append_farm_log(f"[GUI] Added {count} job{'s' if count > 1 else ''} to farm queue from folder")
 
     # --- Farm: Context Menus ---
     def _show_slave_context_menu(self, pos):
