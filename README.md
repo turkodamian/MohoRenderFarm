@@ -128,7 +128,7 @@ Save and load your render settings as named presets. Set a default preset that l
 Set up distributed rendering across multiple PCs:
 
 1. **Master PC**: Click "Start Master" - it will listen for slave connections
-2. **Slave PCs**: Enter the master's IP and port, click "Start Slave"
+2. **Slave PCs**: Click **Find Master** to auto-detect, or manually enter the master's IP and port, then click "Start Slave"
 3. Add jobs to the local queue, then use **Send to Farm** / **Send All to Farm** to push them to the farm queue
 4. Slaves automatically pull and render jobs from the farm queue
 5. **Auto-send** checkbox: new queue jobs go directly to the farm when master is running
@@ -388,6 +388,10 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 ---
 
 ## Changelog
+
+### v1.3.2
+- **Find Master** - Auto-discover master server on the local network with one click, scans all IPs on the subnet in parallel
+- **Updated Screenshots** - Refreshed all GUI screenshots to reflect the latest features
 
 ### v1.3.1
 - **Default Output Folder** - App Settings option to set a custom default output folder or use the project folder as default for all renders

@@ -543,6 +543,7 @@ class MainWindow(QMainWindow):
     ipc_files_signal = pyqtSignal(list)  # files from another instance
     farm_log_signal = pyqtSignal(str)  # farm-specific log messages
     farm_queue_changed_signal = pyqtSignal()  # farm queue needs refresh
+    find_master_signal = pyqtSignal(str)  # found master IP or empty string
 
     def __init__(self, config: AppConfig, initial_files=None, add_to_queue_files=None):
         super().__init__()
@@ -973,6 +974,11 @@ class MainWindow(QMainWindow):
         self.spin_port.setValue(self.config.get("network_port", 5580))
         self.spin_port.setFixedWidth(100)
         conn_row.addWidget(self.spin_port)
+        conn_row.addSpacing(10)
+        self.btn_find_master = QPushButton("Find Master")
+        self.btn_find_master.setToolTip("Scan local network for a running master server")
+        self.btn_find_master.clicked.connect(self._find_master)
+        conn_row.addWidget(self.btn_find_master)
         conn_row.addSpacing(20)
 
         self.chk_auto_send_farm = QCheckBox("Auto-send new queue jobs to farm")
@@ -1163,6 +1169,7 @@ class MainWindow(QMainWindow):
         self.ipc_files_signal.connect(self._on_ipc_files)
         self.farm_log_signal.connect(self._append_farm_log)
         self.farm_queue_changed_signal.connect(self._refresh_farm_queue_table)
+        self.find_master_signal.connect(self._on_master_found)
 
         # Queue controls
         self.btn_add_files.clicked.connect(self._add_files)
@@ -1847,6 +1854,71 @@ class MainWindow(QMainWindow):
         self.lbl_farm_stats.setText("Farm: not running")
         self.lbl_farm_total_time.setText("")
         self.farm_queue_table.setRowCount(0)
+
+    def _find_master(self):
+        """Start scanning local network for a running master server."""
+        self.btn_find_master.setEnabled(False)
+        self.lbl_farm_status.setText("Scanning network...")
+        self.lbl_farm_status.setStyleSheet("color: #89b4fa; font-weight: bold;")
+        self.farm_log_signal.emit("[GUI] Scanning local network for master...")
+        import threading
+        threading.Thread(target=self._scan_network, daemon=True).start()
+
+    def _scan_network(self):
+        """Scan local subnet for a running master server (background thread)."""
+        import socket
+        import concurrent.futures
+        import requests
+
+        port = self.spin_port.value()
+
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            s.close()
+        except Exception:
+            self.find_master_signal.emit("")
+            return
+
+        subnet = ".".join(local_ip.split(".")[:3])
+        self.farm_log_signal.emit(f"[GUI] Local IP: {local_ip} — scanning {subnet}.1-254 on port {port}...")
+
+        def _check_host(ip):
+            try:
+                resp = requests.get(f"http://{ip}:{port}/api/status", timeout=1.5)
+                if resp.status_code == 200:
+                    resp.json()
+                    return ip
+            except Exception:
+                pass
+            return None
+
+        found = None
+        with concurrent.futures.ThreadPoolExecutor(max_workers=30) as pool:
+            futures = {pool.submit(_check_host, f"{subnet}.{i}"): i for i in range(1, 255)}
+            for future in concurrent.futures.as_completed(futures):
+                result = future.result()
+                if result:
+                    found = result
+                    for f in futures:
+                        f.cancel()
+                    break
+
+        self.find_master_signal.emit(found or "")
+
+    def _on_master_found(self, ip):
+        """Handle result of network scan for master."""
+        self.btn_find_master.setEnabled(True)
+        if ip:
+            self.edit_master_host.setText(ip)
+            self.farm_log_signal.emit(f"[GUI] Master found at {ip}")
+            self.lbl_farm_status.setText(f"Master found: {ip}")
+            self.lbl_farm_status.setStyleSheet("color: #a6e3a1; font-weight: bold;")
+        else:
+            self.farm_log_signal.emit("[GUI] No master found on local network")
+            self.lbl_farm_status.setText("No master found")
+            self.lbl_farm_status.setStyleSheet("color: #f38ba8; font-weight: bold;")
 
     def _start_slave(self):
         from src.network.slave import SlaveClient
