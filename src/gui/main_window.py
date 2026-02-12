@@ -2455,16 +2455,24 @@ class MainWindow(QMainWindow):
 
     def _do_update_check_only(self):
         """Background thread: only check if an update exists (don't download)."""
-        from src.updater import check_for_update
-        new_version = check_for_update(APP_VERSION)
-        self.update_check_signal.emit(new_version or "", False)
+        try:
+            from src.updater import check_for_update
+            new_version = check_for_update(APP_VERSION)
+            self.update_check_signal.emit(new_version or "", False)
+        except Exception as e:
+            self.log_signal.emit(f"Update check error: {e}")
+            self.update_check_signal.emit("", False)
 
     def _do_download_update(self, version):
         """Background thread: download and stage the update."""
-        from src.updater import download_and_stage_update
-        success = download_and_stage_update(
-            on_progress=lambda msg: self.log_signal.emit(msg))
-        self.update_check_signal.emit(version, success)
+        try:
+            from src.updater import download_and_stage_update
+            success = download_and_stage_update(
+                on_progress=lambda msg: self.log_signal.emit(msg))
+            self.update_check_signal.emit(version, success)
+        except Exception as e:
+            self.log_signal.emit(f"Update download error: {e}")
+            self.update_check_signal.emit("", False)
 
     def _on_update_result(self, version, downloaded):
         """Handle update check/download result (GUI thread)."""
@@ -2473,6 +2481,7 @@ class MainWindow(QMainWindow):
             # Update downloaded and staged — offer restart
             self.lbl_update_status.setText(f"v{version} ready — restart to apply")
             self.lbl_update_status.setStyleSheet("color: #a6e3a1; font-weight: bold;")
+            self._append_log(f"Update v{version} downloaded and ready to install")
             reply = QMessageBox.question(
                 self, "Update Ready",
                 f"Moho Render Farm v{version} has been downloaded.\n\n"
@@ -2485,6 +2494,7 @@ class MainWindow(QMainWindow):
             # Update found — ask user if they want to download
             self.lbl_update_status.setText(f"v{version} available")
             self.lbl_update_status.setStyleSheet("color: #f9e2af; font-weight: bold;")
+            self._append_log(f"Update available: v{version} (current: v{APP_VERSION})")
             reply = QMessageBox.question(
                 self, "Update Available",
                 f"Moho Render Farm v{version} is available (current: v{APP_VERSION}).\n\n"
@@ -2495,14 +2505,17 @@ class MainWindow(QMainWindow):
                 self.btn_check_update.setEnabled(False)
                 self.lbl_update_status.setText(f"Downloading v{version}...")
                 self.lbl_update_status.setStyleSheet("color: #89b4fa;")
+                self._append_log(f"Downloading update v{version}...")
                 import threading
                 threading.Thread(target=self._do_download_update, args=(version,), daemon=True).start()
             else:
                 self.lbl_update_status.setText(f"v{version} available — skipped")
                 self.lbl_update_status.setStyleSheet("color: #a6adc8;")
+                self._append_log(f"Update v{version} skipped by user")
         else:
             self.lbl_update_status.setText("You are up to date")
             self.lbl_update_status.setStyleSheet("color: #a6adc8;")
+            self._append_log(f"No updates available (current: v{APP_VERSION})")
 
     def _apply_update_and_restart(self):
         """Launch the update script and close the app."""
