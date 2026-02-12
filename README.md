@@ -404,6 +404,11 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 - **Log Timestamps** - Log entries now include full date and time (`[YYYY-MM-DD HH:MM:SS]`)
 - **Updated Screenshots** - Refreshed all GUI screenshots at maximized window size
 
+### v1.3.6
+- **Context Menu Fix** - Right-click menu now works on PCs with Moho installed by registering under existing ProgIDs and SystemFileAssociations
+- **Slave Connection Status** - Status label now correctly shows connected/disconnected state
+- **About Links** - Clickable email and website links in About section with readable colors on dark theme
+
 ### v1.3.4
 - **Zero-Install** - Python, FFmpeg, and all dependencies are now bundled in the repository. Just clone/download and run `start.bat` — no installation step required
 - **Removed install.bat** - No longer needed since everything is pre-bundled
