@@ -1439,7 +1439,14 @@ class MainWindow(QMainWindow):
         about_layout = QVBoxLayout(about_group)
         about_layout.addWidget(QLabel(f"{APP_NAME} v{APP_VERSION}"))
         about_layout.addWidget(QLabel(f"Created by {APP_AUTHOR}"))
-        about_layout.addWidget(QLabel("Contact: damian@realidad360.com.ar"))
+        link_style = 'style="color: #74c7ec;"'
+        lbl_email = QLabel(f'Contact: <a href="mailto:damian@realidad360.com.ar" {link_style}>damian@realidad360.com.ar</a>')
+        lbl_email.setOpenExternalLinks(True)
+        lbl_email.setTextInteractionFlags(lbl_email.textInteractionFlags() | Qt.TextInteractionFlag.TextSelectableByMouse)
+        about_layout.addWidget(lbl_email)
+        lbl_web = QLabel(f'Web: <a href="https://realidad360.com.ar" {link_style}>realidad360.com.ar</a>')
+        lbl_web.setOpenExternalLinks(True)
+        about_layout.addWidget(lbl_web)
         about_layout.addWidget(QLabel("Batch rendering tool for Moho Animation v14"))
         donate_row = QHBoxLayout()
         btn_donate = QPushButton("Donate via PayPal")
@@ -2287,12 +2294,17 @@ class MainWindow(QMainWindow):
 
     def _show_about(self):
         """Show About dialog."""
-        QMessageBox.about(
-            self, "About Moho Render Farm",
-            f"{APP_NAME} v{APP_VERSION}\n\n"
-            f"by {APP_AUTHOR}\n"
-            f"damian@realidad360.com.ar\n\n"
+        link = 'style="color: #74c7ec;"'
+        dlg = QMessageBox(self)
+        dlg.setWindowTitle("About Moho Render Farm")
+        dlg.setTextFormat(Qt.TextFormat.RichText)
+        dlg.setText(
+            f"<b>{APP_NAME} v{APP_VERSION}</b><br><br>"
+            f"by {APP_AUTHOR}<br>"
+            f'<a href="mailto:damian@realidad360.com.ar" {link}>damian@realidad360.com.ar</a><br>'
+            f'<a href="https://realidad360.com.ar" {link}>realidad360.com.ar</a><br><br>'
             f"Batch rendering tool for Moho Animation v14")
+        dlg.exec()
 
     def _start_slave(self):
         from src.network.slave import SlaveClient
