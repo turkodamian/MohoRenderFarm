@@ -398,6 +398,10 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 
 ## Changelog
 
+### v1.5.1
+- **Force Update All Slaves** - Master can force all connected slaves to download the latest version, restart, and auto-reconnect without any user intervention on the slave side
+- **Auto-reconnect After Update** - Slaves automatically reconnect to the same master after a forced update restart
+
 ### v1.5.0
 - **Slave Job Queue Display** - Farm slaves now show active and completed jobs in the Farm Job Queue table, with real-time progress updates and render history
 

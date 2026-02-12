@@ -56,6 +56,7 @@ class MasterServer:
         self.reserved_jobs: Dict[str, RenderJob] = {}  # slave_address -> reserved job
         self.completed_jobs: List[RenderJob] = []  # history of completed/failed jobs
         self._cancel_requests: set = set()  # job IDs that slaves should cancel
+        self._force_update = False  # When True, heartbeat tells all slaves to update
         self._lock = threading.Lock()
         self._running = False
         self._thread = None
@@ -128,7 +129,11 @@ class MasterServer:
                     if job.id in self._cancel_requests:
                         cancel_ids.append(job.id)
 
-            return jsonify({"status": "ok", "cancel_jobs": cancel_ids})
+            return jsonify({
+                "status": "ok",
+                "cancel_jobs": cancel_ids,
+                "force_update": self._force_update,
+            })
 
         @app.route("/api/get_job", methods=["GET"])
         def get_job():
@@ -396,6 +401,16 @@ class MasterServer:
         if self.on_output:
             self.on_output(f"Cleared {count} completed farm jobs")
         self._notify_queue_changed()
+
+    def force_update_slaves(self):
+        """Set the force_update flag so all slaves update on next heartbeat."""
+        self._force_update = True
+        if self.on_output:
+            self.on_output("Force update broadcast to all slaves")
+
+    def clear_force_update(self):
+        """Clear the force_update flag."""
+        self._force_update = False
 
     def start(self):
         """Start the master server."""

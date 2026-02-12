@@ -804,6 +804,7 @@ class MainWindow(QMainWindow):
     farm_queue_changed_signal = pyqtSignal()  # farm queue needs refresh
     find_master_signal = pyqtSignal(str)  # found master IP or empty string
     update_check_signal = pyqtSignal(str, bool)  # (version, success)
+    slave_force_update_signal = pyqtSignal()  # slave received force update command
 
     def __init__(self, config: AppConfig, initial_files=None, add_to_queue_files=None):
         super().__init__()
@@ -851,6 +852,8 @@ class MainWindow(QMainWindow):
 
         # Check for updates after a short delay
         QTimer.singleShot(3000, self._check_update_on_startup)
+        # Auto-reconnect as slave if restarting after forced update
+        QTimer.singleShot(5000, self._auto_reconnect_slave)
 
     def _setup_ui(self):
         self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
@@ -1348,6 +1351,12 @@ class MainWindow(QMainWindow):
         self.btn_clear_completed_farm.setToolTip("Clear completed jobs from the farm queue")
         self.btn_clear_completed_farm.clicked.connect(self._clear_completed_farm_jobs)
         farm_controls.addWidget(self.btn_clear_completed_farm)
+        self.btn_force_update_slaves = QPushButton("Force Update Slaves")
+        self.btn_force_update_slaves.setToolTip(
+            "Force all connected slaves to download the latest version and restart")
+        self.btn_force_update_slaves.setEnabled(False)
+        self.btn_force_update_slaves.clicked.connect(self._force_update_slaves)
+        farm_controls.addWidget(self.btn_force_update_slaves)
         farm_controls.addStretch()
         layout.addLayout(farm_controls)
 
@@ -1549,6 +1558,7 @@ class MainWindow(QMainWindow):
         self.farm_queue_changed_signal.connect(self._refresh_farm_queue_table)
         self.find_master_signal.connect(self._on_master_found)
         self.update_check_signal.connect(self._on_update_result)
+        self.slave_force_update_signal.connect(self._on_slave_force_update)
 
         # Queue controls
         self.btn_add_files.clicked.connect(self._add_files)
@@ -2369,6 +2379,7 @@ class MainWindow(QMainWindow):
         self.btn_start_master.setEnabled(False)
         self.btn_stop_master.setEnabled(True)
         self.btn_start_slave.setEnabled(False)
+        self.btn_force_update_slaves.setEnabled(True)
         ip = self.master_server.get_local_ip()
         self.lbl_farm_status.setText(f"Master running on {ip}:{port}")
         self.lbl_farm_status.setStyleSheet("color: #a6e3a1; font-weight: bold;")
@@ -2398,6 +2409,7 @@ class MainWindow(QMainWindow):
         self.btn_start_master.setEnabled(True)
         self.btn_stop_master.setEnabled(False)
         self.btn_start_slave.setEnabled(True)
+        self.btn_force_update_slaves.setEnabled(False)
         self.lbl_farm_status.setText("Status: Stopped")
         self.lbl_farm_status.setStyleSheet("color: #f9e2af; font-weight: bold;")
         self.lbl_farm_stats.setText("Farm: not running")
@@ -2551,12 +2563,33 @@ class MainWindow(QMainWindow):
         else:
             self._append_log("Failed to launch update script")
 
+    def _on_slave_force_update(self):
+        """Handle force update from master: save reconnect flag, apply update, restart."""
+        self._append_farm_log("[SLAVE] Force update received, restarting...")
+        self._append_log("Force update from master, restarting...")
+        self.config.set("auto_reconnect_slave", True)
+        self._apply_update_and_restart()
+
     def _check_update_on_startup(self):
         """Check for updates on startup and ask user before downloading."""
         if self.config.get("auto_check_updates", True):
             self._append_log("Checking for updates...")
             import threading
             threading.Thread(target=self._do_update_check_only, daemon=True).start()
+
+    def _auto_reconnect_slave(self):
+        """Auto-start slave if reconnecting after a forced update."""
+        if not self.config.get("auto_reconnect_slave", False):
+            return
+        self.config.set("auto_reconnect_slave", False)
+        self._append_log("Auto-reconnecting to master after update...")
+        self._append_farm_log("[SLAVE] Auto-reconnecting after update...")
+        # Switch to farm tab
+        for i in range(self.tabs.count()):
+            if self.tabs.tabText(i) == "Render Farm":
+                self.tabs.setCurrentIndex(i)
+                break
+        self._start_slave()
 
     def _report_bug(self):
         """Open bug report dialog."""
@@ -2593,6 +2626,7 @@ class MainWindow(QMainWindow):
             f"Slave: {s}", "#a6e3a1")
         self.slave_client.on_job_started = lambda j: self.farm_queue_changed_signal.emit()
         self.slave_client.on_job_completed = lambda j: self.farm_queue_changed_signal.emit()
+        self.slave_client.on_force_update = lambda: self.slave_force_update_signal.emit()
         self.slave_client.start()
 
         # Timer to refresh farm queue table while slave is running
@@ -3105,6 +3139,24 @@ class MainWindow(QMainWindow):
         self.master_server.clear_completed_farm_jobs()
         self._append_farm_log("[GUI] Cleared completed farm jobs")
         self._refresh_farm_queue_table()
+
+    def _force_update_slaves(self):
+        """Force all connected slaves to update to the latest version."""
+        if not self.master_server:
+            return
+        alive = [s for s in self.master_server.slaves.values() if s.is_alive]
+        if not alive:
+            QMessageBox.information(self, "No Slaves", "No connected slaves to update.")
+            return
+        self.master_server.force_update_slaves()
+        self._append_farm_log(f"[MASTER] Force update sent to {len(alive)} slave(s)")
+        QTimer.singleShot(120000, self._clear_force_update_flag)
+
+    def _clear_force_update_flag(self):
+        """Clear the force_update flag after timeout."""
+        if self.master_server:
+            self.master_server.clear_force_update()
+            self._append_farm_log("[MASTER] Force update flag cleared")
 
     # --- Render Presets ---
     def _load_preset_list(self):

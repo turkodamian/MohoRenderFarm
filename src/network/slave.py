@@ -29,6 +29,7 @@ class SlaveClient:
         self._lock = threading.Lock()
         self._active_renders: Dict[int, Tuple[MohoRenderer, RenderJob]] = {}
         self.completed_jobs: List[RenderJob] = []
+        self._force_update_triggered = False
 
         # Callbacks
         self.on_connected: Optional[Callable[[], None]] = None
@@ -37,6 +38,7 @@ class SlaveClient:
         self.on_job_completed: Optional[Callable[[RenderJob], None]] = None
         self.on_output: Optional[Callable[[str], None]] = None
         self.on_status_changed: Optional[Callable[[str], None]] = None
+        self.on_force_update: Optional[Callable[[], None]] = None
 
     @property
     def master_url(self):
@@ -117,9 +119,48 @@ class SlaveClient:
                     data = resp.json()
                     for job_id in data.get("cancel_jobs", []):
                         self._cancel_active_job(job_id)
+                    if data.get("force_update") and not self._force_update_triggered:
+                        self._force_update_triggered = True
+                        if self.on_output:
+                            self.on_output("Master requested force update, checking...")
+                        threading.Thread(target=self._handle_force_update, daemon=True).start()
             except Exception:
                 pass
             time.sleep(10)
+
+    def _handle_force_update(self):
+        """Check for update, download+stage, then signal GUI to restart."""
+        try:
+            from src.updater import check_for_update, download_and_stage_update
+            from src.config import APP_VERSION
+
+            new_version = check_for_update(APP_VERSION)
+            if not new_version:
+                if self.on_output:
+                    self.on_output("Already up to date, no update needed")
+                self._force_update_triggered = False
+                return
+
+            if self.on_output:
+                self.on_output(f"Update v{new_version} found, downloading...")
+
+            success = download_and_stage_update(
+                on_progress=lambda msg: self.on_output(msg) if self.on_output else None
+            )
+
+            if success:
+                if self.on_output:
+                    self.on_output(f"Update v{new_version} staged, restarting...")
+                if self.on_force_update:
+                    self.on_force_update()
+            else:
+                if self.on_output:
+                    self.on_output("Update download failed")
+                self._force_update_triggered = False
+        except Exception as e:
+            if self.on_output:
+                self.on_output(f"Force update error: {e}")
+            self._force_update_triggered = False
 
     def _cancel_active_job(self, job_id: str):
         """Cancel a specific active render by job ID (requested by master)."""
