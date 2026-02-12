@@ -1,8 +1,5 @@
 MohoProjects/
-ffmpeg/
-ffmpeg.zip
 ffmpeg-download.zip
-python/
 python-download.zip
 __pycache__/
 *.pyc

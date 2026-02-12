@@ -51,25 +51,22 @@ Created by **Damián Turkieh**
 
 ### Installation
 
+**No installation needed!** Everything is bundled in the repository: Python, FFmpeg, and all dependencies.
+
 ```bash
-# 1. Clone or download the repository
+# Clone or download the repository
 git clone https://github.com/turkodamian/MohoRenderFarm.git
 cd MohoRenderFarm
 
-# 2. Run the installer (sets up portable Python and FFmpeg)
-install.bat
+# Launch — that's it!
+start.bat
 ```
-
-All Python dependencies (PyQt6, Flask, requests) are bundled in the `lib/` folder — no pip install needed. The installer only downloads a portable Python interpreter and FFmpeg.
 
 ### Launch
 
 ```bash
 # GUI mode (double-click or run)
 start.bat
-
-# Or directly
-python main.py
 ```
 
 ---
@@ -167,7 +164,7 @@ When rendering with layer comps (e.g., `AllLayerComps`) and the **Auto-compose**
 
 ### Requirements
 
-FFmpeg is downloaded automatically by `install.bat` or `python scripts/setup_ffmpeg.py`. No manual installation needed.
+FFmpeg is bundled in the `ffmpeg/` folder. No manual installation needed.
 
 ---
 
@@ -342,17 +339,16 @@ Master PC (port 5580)
 ```
 MohoRenderFarm/
 ├── main.py                 # Entry point (GUI + CLI)
-├── start.bat               # Quick launcher
-├── install.bat             # Installer
-├── requirements.txt        # Python dependencies
-├── lib/                    # Vendored Python dependencies (PyQt6, Flask, etc.)
-├── scripts/
-│   ├── setup_python.py     # Portable Python auto-downloader
-│   └── setup_ffmpeg.py     # FFmpeg auto-downloader
-├── python/                 # Portable Python (auto-downloaded)
-├── ffmpeg/                 # FFmpeg binaries (auto-downloaded)
+├── start.bat               # Quick launcher (double-click to run)
+├── requirements.txt        # Python dependencies reference
+├── python/                 # Bundled portable Python 3.10
+├── ffmpeg/                 # Bundled FFmpeg binaries
 │   ├── ffmpeg.exe          # FFmpeg encoder
 │   └── ffprobe.exe         # FFmpeg probe
+├── lib/                    # Bundled Python dependencies (PyQt6, Flask, etc.)
+├── scripts/
+│   ├── setup_python.py     # Portable Python downloader (for maintenance)
+│   └── setup_ffmpeg.py     # FFmpeg downloader (for maintenance)
 ├── src/
 │   ├── config.py           # App configuration
 │   ├── updater.py          # Auto-update from GitHub
@@ -378,9 +374,7 @@ MohoRenderFarm/
 
 - **Moho Pro 14** (or compatible version)
 - **Windows** (tested on Windows 10/11)
-- **Python** 3.10+ (auto-installed as portable by `install.bat`, or use system Python)
-- **FFmpeg** - Auto-downloaded by installer (used for layer comp composition)
-- **Dependencies**: PyQt6, Flask, requests (bundled in `lib/`, no install needed)
+- Everything else is bundled: Python 3.10, FFmpeg, PyQt6, Flask, requests — zero installation needed
 
 ---
 
@@ -401,6 +395,10 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 ---
 
 ## Changelog
+
+### v1.3.4
+- **Zero-Install** - Python, FFmpeg, and all dependencies are now bundled in the repository. Just clone/download and run `start.bat` — no installation step required
+- **Removed install.bat** - No longer needed since everything is pre-bundled
 
 ### v1.3.3
 - **Portable Python** - Installer now downloads and bundles Python 3.10 embeddable, no system Python required

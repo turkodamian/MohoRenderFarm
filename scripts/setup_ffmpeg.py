@@ -6,8 +6,8 @@ import urllib.request
 import shutil
 from pathlib import Path
 
-# Public FFmpeg builds from BtbN (GitHub) - always points to latest release
-FFMPEG_URL = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+# FFmpeg essentials build from gyan.dev - static, smaller than full build (<100MB per exe)
+FFMPEG_URL = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
 APP_ROOT = Path(__file__).parent.parent
 FFMPEG_DIR = APP_ROOT / "ffmpeg"
 FFMPEG_ZIP = APP_ROOT / "ffmpeg-download.zip"
