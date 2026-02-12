@@ -1,9 +1,8 @@
 @echo off
-chcp 65001 >nul
 title Moho Render Farm - Installer
 echo ============================================
 echo   Moho Render Farm - Installer
-echo   by Damián Turkieh
+echo   by Damian Turkieh
 echo ============================================
 echo.
 
