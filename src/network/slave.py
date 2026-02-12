@@ -28,6 +28,7 @@ class SlaveClient:
         self._heartbeat_thread = None
         self._lock = threading.Lock()
         self._active_renders: Dict[int, Tuple[MohoRenderer, RenderJob]] = {}
+        self.completed_jobs: List[RenderJob] = []
 
         # Callbacks
         self.on_connected: Optional[Callable[[], None]] = None
@@ -184,6 +185,7 @@ class SlaveClient:
                 job.status = RenderStatus.FAILED.value
                 job.error_message = "Failed to download project files from master"
                 self._report_completion(job)
+                self.completed_jobs.append(job)
                 if self.on_job_completed:
                     self.on_job_completed(job)
                 return
@@ -229,6 +231,8 @@ class SlaveClient:
         # Cleanup downloaded files
         if work_dir:
             self._cleanup_work_dir(work_dir, job)
+
+        self.completed_jobs.append(job)
 
         if self.on_job_completed:
             self.on_job_completed(job)

@@ -2591,7 +2591,14 @@ class MainWindow(QMainWindow):
             f"Slave disconnected from {host}:{port}", "#f38ba8")
         self.slave_client.on_status_changed = lambda s: self.farm_status_signal.emit(
             f"Slave: {s}", "#a6e3a1")
+        self.slave_client.on_job_started = lambda j: self.farm_queue_changed_signal.emit()
+        self.slave_client.on_job_completed = lambda j: self.farm_queue_changed_signal.emit()
         self.slave_client.start()
+
+        # Timer to refresh farm queue table while slave is running
+        self._slave_queue_timer = QTimer()
+        self._slave_queue_timer.timeout.connect(self._refresh_farm_queue_table)
+        self._slave_queue_timer.start(3000)
 
         self.btn_start_slave.setEnabled(False)
         self.btn_stop_slave.setEnabled(True)
@@ -2603,6 +2610,8 @@ class MainWindow(QMainWindow):
         self.config.set("network_port", port)
 
     def _stop_slave(self):
+        if hasattr(self, '_slave_queue_timer'):
+            self._slave_queue_timer.stop()
         if self.slave_client:
             self._append_farm_log("[SLAVE] Stopped")
             self.slave_client.stop()
@@ -2612,6 +2621,9 @@ class MainWindow(QMainWindow):
         self.btn_start_master.setEnabled(True)
         self.lbl_farm_status.setText("Status: Stopped")
         self.lbl_farm_status.setStyleSheet("color: #f9e2af; font-weight: bold;")
+        self.lbl_farm_stats.setText("Farm: not running")
+        self.lbl_farm_total_time.setText("")
+        self.farm_queue_table.setRowCount(0)
 
     def _refresh_slaves(self):
         if not self.master_server:
@@ -2637,10 +2649,15 @@ class MainWindow(QMainWindow):
 
     def _refresh_farm_queue_table(self):
         """Refresh the Farm Queue table with all farm jobs."""
-        if not self.master_server:
+        if not self.master_server and not self.slave_client:
             self.farm_queue_table.setRowCount(0)
             self.lbl_farm_stats.setText("Farm: not running")
             self.lbl_farm_total_time.setText("")
+            return
+
+        # Slave mode: show slave's own active + completed jobs
+        if not self.master_server and self.slave_client:
+            self._refresh_farm_queue_table_slave()
             return
 
         all_jobs = self.master_server.get_all_farm_jobs()
@@ -2700,6 +2717,69 @@ class MainWindow(QMainWindow):
         self.lbl_farm_stats.setText(
             f"Farm: {pending_count} pending | {active_count} active | "
             f"{completed_count} completed | {failed_count} failed"
+        )
+        if total_time > 0:
+            mins, secs = divmod(int(total_time), 60)
+            hours, mins = divmod(mins, 60)
+            if hours:
+                time_str = f"{hours}h {mins}m {secs}s"
+            elif mins:
+                time_str = f"{mins}m {secs}s"
+            else:
+                time_str = f"{secs}s"
+            self.lbl_farm_total_time.setText(f"Total render time: {time_str}")
+        else:
+            self.lbl_farm_total_time.setText("")
+
+    def _refresh_farm_queue_table_slave(self):
+        """Refresh the Farm Queue table with the slave's own jobs."""
+        active_jobs = self.slave_client.current_jobs if self.slave_client else []
+        completed_jobs = self.slave_client.completed_jobs if self.slave_client else []
+
+        display_jobs = []
+        for job in active_jobs:
+            display_jobs.append(("RENDERING", job))
+        for job in reversed(completed_jobs):
+            display_jobs.append((job.status.upper(), job))
+
+        color_map = {
+            "RENDERING": "#89b4fa",
+            "COMPLETED": "#a6e3a1",
+            "FAILED": "#f38ba8",
+            "CANCELLED": "#6c7086",
+        }
+
+        self.farm_queue_table.setRowCount(len(display_jobs))
+        total_time = 0.0
+
+        for row, (status_text, job) in enumerate(display_jobs):
+            status_item = QTableWidgetItem(status_text)
+            status_item.setForeground(QColor(color_map.get(status_text, "#cdd6f4")))
+            self.farm_queue_table.setItem(row, 0, status_item)
+            self.farm_queue_table.setItem(row, 1, QTableWidgetItem(job.project_name))
+            self.farm_queue_table.setItem(row, 2, QTableWidgetItem(job.format))
+            self.farm_queue_table.setItem(row, 3, QTableWidgetItem("-"))
+            self.farm_queue_table.setItem(row, 4, QTableWidgetItem(f"{job.progress:.0f}%"))
+            self.farm_queue_table.setItem(row, 5, QTableWidgetItem(job.elapsed_str))
+            out_text = ""
+            if job.output_path:
+                out_text = os.path.basename(os.path.dirname(job.output_path)) or os.path.dirname(job.output_path)
+            elif job.project_file:
+                out_text = os.path.basename(os.path.dirname(job.project_file))
+            out_item = QTableWidgetItem(out_text)
+            out_item.setForeground(QColor("#89b4fa"))
+            self.farm_queue_table.setItem(row, 6, out_item)
+            self.farm_queue_table.setItem(row, 7, QTableWidgetItem(job.id))
+
+            if job.elapsed_time > 0 and job.status in (RenderStatus.COMPLETED.value, RenderStatus.FAILED.value):
+                total_time += job.elapsed_time
+
+        active_count = len(active_jobs)
+        completed_count = sum(1 for j in completed_jobs if j.status == RenderStatus.COMPLETED.value)
+        failed_count = sum(1 for j in completed_jobs if j.status != RenderStatus.COMPLETED.value)
+
+        self.lbl_farm_stats.setText(
+            f"Slave: {active_count} rendering | {completed_count} completed | {failed_count} failed"
         )
         if total_time > 0:
             mins, secs = divmod(int(total_time), 60)

@@ -398,6 +398,9 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 
 ## Changelog
 
+### v1.5.0
+- **Slave Job Queue Display** - Farm slaves now show active and completed jobs in the Farm Job Queue table, with real-time progress updates and render history
+
 ### v1.4.9
 - **Farm Queue Output Column** - New clickable Output column in the Farm Job Queue table, click to open the output folder in Windows Explorer
 - **FFmpeg Compose on Farm Slaves** - Layer comp auto-composition with FFmpeg now works on remote slave machines (previously only worked on master/local renders)
