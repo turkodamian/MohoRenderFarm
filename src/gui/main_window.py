@@ -30,12 +30,15 @@ from src.gui.styles import DARK_THEME
 class BugReportDialog(QDialog):
     """Dialog for reporting bugs via Discord webhook."""
     send_result = pyqtSignal(bool, str)
+    MAX_IMAGE_SIZE = 25 * 1024 * 1024  # 25 MB (Discord free limit)
+    IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp")
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Report a Bug")
         self.setMinimumWidth(550)
         self._latest_log = self._find_latest_log()
+        self._image_path = None
         self.send_result.connect(self._on_send_result)
         self._setup_ui()
 
@@ -52,6 +55,22 @@ class BugReportDialog(QDialog):
     def _setup_ui(self):
         layout = QVBoxLayout(self)
 
+        # Name and email row
+        info_row = QHBoxLayout()
+        name_col = QVBoxLayout()
+        name_col.addWidget(QLabel("Name:"))
+        self.edit_name = QLineEdit()
+        self.edit_name.setPlaceholderText("Your name")
+        name_col.addWidget(self.edit_name)
+        info_row.addLayout(name_col)
+        email_col = QVBoxLayout()
+        email_col.addWidget(QLabel("Email:"))
+        self.edit_email = QLineEdit()
+        self.edit_email.setPlaceholderText("your@email.com")
+        email_col.addWidget(self.edit_email)
+        info_row.addLayout(email_col)
+        layout.addLayout(info_row)
+
         layout.addWidget(QLabel("Subject:"))
         self.edit_subject = QLineEdit()
         self.edit_subject.setPlaceholderText("Brief description of the issue")
@@ -63,8 +82,24 @@ class BugReportDialog(QDialog):
             "Describe the bug in detail...\n\n"
             "Steps to reproduce:\n1. \n2. \n3. \n\n"
             "Expected behavior:\n\nActual behavior:")
-        self.edit_description.setMinimumHeight(200)
+        self.edit_description.setMinimumHeight(180)
         layout.addWidget(self.edit_description)
+
+        # Image attachment
+        img_row = QHBoxLayout()
+        btn_attach = QPushButton("Attach Screenshot...")
+        btn_attach.clicked.connect(self._pick_image)
+        img_row.addWidget(btn_attach)
+        self.lbl_image = QLabel("No image attached")
+        self.lbl_image.setStyleSheet("color: #a6adc8;")
+        img_row.addWidget(self.lbl_image)
+        self.btn_clear_image = QPushButton("X")
+        self.btn_clear_image.setFixedWidth(28)
+        self.btn_clear_image.setVisible(False)
+        self.btn_clear_image.clicked.connect(self._clear_image)
+        img_row.addWidget(self.btn_clear_image)
+        img_row.addStretch()
+        layout.addLayout(img_row)
 
         # Log attachment
         log_row = QHBoxLayout()
@@ -87,14 +122,39 @@ class BugReportDialog(QDialog):
         self.btn_send.setObjectName("primaryBtn")
         self.btn_send.clicked.connect(self._send_report)
         btn_row.addWidget(self.btn_send)
-        btn_cancel = QPushButton("Cancel")
-        btn_cancel.clicked.connect(self.reject)
-        btn_row.addWidget(btn_cancel)
+        self.btn_close = QPushButton("Close")
+        self.btn_close.clicked.connect(self.reject)
+        btn_row.addWidget(self.btn_close)
         btn_row.addStretch()
         layout.addLayout(btn_row)
 
         self.lbl_status = QLabel("")
         layout.addWidget(self.lbl_status)
+
+    def _pick_image(self):
+        exts = " ".join(f"*{e}" for e in self.IMAGE_EXTENSIONS)
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Attach Screenshot", "",
+            f"Images ({exts});;All Files (*)")
+        if not path:
+            return
+        size = os.path.getsize(path)
+        if size > self.MAX_IMAGE_SIZE:
+            mb = size / (1024 * 1024)
+            QMessageBox.warning(
+                self, "File Too Large",
+                f"Image is {mb:.1f} MB. Maximum allowed is 25 MB.")
+            return
+        self._image_path = path
+        self.lbl_image.setText(os.path.basename(path))
+        self.lbl_image.setStyleSheet("color: #cdd6f4;")
+        self.btn_clear_image.setVisible(True)
+
+    def _clear_image(self):
+        self._image_path = None
+        self.lbl_image.setText("No image attached")
+        self.lbl_image.setStyleSheet("color: #a6adc8;")
+        self.btn_clear_image.setVisible(False)
 
     def _send_report(self):
         subject = self.edit_subject.text().strip()
@@ -111,55 +171,84 @@ class BugReportDialog(QDialog):
         self.lbl_status.setText("Sending report...")
         self.lbl_status.setStyleSheet("color: #a6adc8;")
 
+        name = self.edit_name.text().strip()
+        email = self.edit_email.text().strip()
         include_log = (self.chk_include_log.isChecked() and self._latest_log)
         log_path = str(self._latest_log) if include_log else None
+        image_path = self._image_path
 
         threading.Thread(
-            target=self._do_send, args=(subject, body, log_path),
+            target=self._do_send,
+            args=(subject, body, name, email, log_path, image_path),
             daemon=True).start()
 
-    def _do_send(self, subject, body, log_path):
+    def _do_send(self, subject, body, name, email, log_path, image_path):
         import json as _json
         import urllib.request
+        import mimetypes
         try:
-            payload = _json.dumps({
-                "embeds": [{
-                    "title": f"[Bug] {subject}",
-                    "description": body[:4096],
-                    "color": 0xFF0000,
-                    "footer": {"text": f"v{APP_VERSION}"},
-                }]
-            })
+            # Build embed fields
+            fields = []
+            if name:
+                fields.append({"name": "Name", "value": name, "inline": True})
+            if email:
+                fields.append({"name": "Email", "value": email, "inline": True})
+
+            embed = {
+                "title": f"[Bug] {subject}",
+                "description": body[:4096],
+                "color": 0xFF0000,
+                "footer": {"text": f"v{APP_VERSION}"},
+            }
+            if fields:
+                embed["fields"] = fields
+
+            payload = _json.dumps({"embeds": [embed]})
 
             boundary = "----MohoRenderFarmBoundary"
-            parts = []
+            body_bytes = b""
 
             # payload_json part
-            parts.append(f"--{boundary}\r\n"
-                         f"Content-Disposition: form-data; name=\"payload_json\"\r\n"
-                         f"Content-Type: application/json\r\n\r\n"
-                         f"{payload}\r\n")
+            body_bytes += (f"--{boundary}\r\n"
+                           f"Content-Disposition: form-data; name=\"payload_json\"\r\n"
+                           f"Content-Type: application/json\r\n\r\n"
+                           f"{payload}\r\n").encode("utf-8")
 
-            # File attachment
-            file_data = None
+            # File attachments (Discord supports up to files[0], files[1], etc.)
+            file_idx = 0
+
             if log_path:
                 try:
                     with open(log_path, "rb") as f:
-                        file_data = f.read()
+                        log_data = f.read()
                     fname = os.path.basename(log_path)
-                    parts.append(f"--{boundary}\r\n"
-                                 f"Content-Disposition: form-data; name=\"files[0]\"; "
-                                 f"filename=\"{fname}\"\r\n"
-                                 f"Content-Type: text/plain\r\n\r\n")
+                    body_bytes += (f"--{boundary}\r\n"
+                                   f"Content-Disposition: form-data; "
+                                   f"name=\"files[{file_idx}]\"; "
+                                   f"filename=\"{fname}\"\r\n"
+                                   f"Content-Type: text/plain\r\n\r\n"
+                                   ).encode("utf-8")
+                    body_bytes += log_data + b"\r\n"
+                    file_idx += 1
                 except (IOError, OSError):
                     pass
 
-            # Build body
-            body_bytes = b""
-            for i, part in enumerate(parts):
-                body_bytes += part.encode("utf-8")
-                if file_data and i == len(parts) - 1:
-                    body_bytes += file_data + b"\r\n"
+            if image_path:
+                try:
+                    with open(image_path, "rb") as f:
+                        img_data = f.read()
+                    fname = os.path.basename(image_path)
+                    mime = mimetypes.guess_type(fname)[0] or "image/png"
+                    body_bytes += (f"--{boundary}\r\n"
+                                   f"Content-Disposition: form-data; "
+                                   f"name=\"files[{file_idx}]\"; "
+                                   f"filename=\"{fname}\"\r\n"
+                                   f"Content-Type: {mime}\r\n\r\n"
+                                   ).encode("utf-8")
+                    body_bytes += img_data + b"\r\n"
+                except (IOError, OSError):
+                    pass
+
             body_bytes += f"--{boundary}--\r\n".encode("utf-8")
 
             req = urllib.request.Request(
@@ -171,7 +260,7 @@ class BugReportDialog(QDialog):
                     "User-Agent": f"MohoRenderFarm/{APP_VERSION}",
                 },
             )
-            resp = urllib.request.urlopen(req, timeout=15)
+            resp = urllib.request.urlopen(req, timeout=30)
             if resp.status in (200, 204):
                 self.send_result.emit(True, "Report sent successfully!")
             else:
@@ -182,8 +271,10 @@ class BugReportDialog(QDialog):
     def _on_send_result(self, success, message):
         if success:
             self.lbl_status.setText(message)
-            self.lbl_status.setStyleSheet("color: #a6e3a1;")
-            QTimer.singleShot(1500, self.accept)
+            self.lbl_status.setStyleSheet("color: #a6e3a1; font-weight: bold;")
+            self.btn_send.setText("Sent!")
+            self.btn_send.setEnabled(False)
+            self.btn_close.setText("Close")
         else:
             self.lbl_status.setText(message)
             self.lbl_status.setStyleSheet("color: #f38ba8;")
