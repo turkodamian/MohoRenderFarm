@@ -55,6 +55,7 @@ class MasterServer:
         self.active_jobs: Dict[str, RenderJob] = {}  # slave_address -> job
         self.reserved_jobs: Dict[str, RenderJob] = {}  # slave_address -> reserved job
         self.completed_jobs: List[RenderJob] = []  # history of completed/failed jobs
+        self._cancel_requests: set = set()  # job IDs that slaves should cancel
         self._lock = threading.Lock()
         self._running = False
         self._thread = None
@@ -117,12 +118,17 @@ class MasterServer:
             port = data.get("port", 0)
             key = f"{ip}:{port}"
 
+            cancel_ids = []
             with self._lock:
                 if key in self.slaves:
                     self.slaves[key].last_heartbeat = time.time()
                     self.slaves[key].status = data.get("status", "idle")
+                if key in self.active_jobs and self._cancel_requests:
+                    job = self.active_jobs[key]
+                    if job.id in self._cancel_requests:
+                        cancel_ids.append(job.id)
 
-            return jsonify({"status": "ok"})
+            return jsonify({"status": "ok", "cancel_jobs": cancel_ids})
 
         @app.route("/api/get_job", methods=["GET"])
         def get_job():
@@ -172,10 +178,18 @@ class MasterServer:
             error = data.get("error", "")
 
             with self._lock:
+                was_cancel_request = job_id in self._cancel_requests
+                self._cancel_requests.discard(job_id)
+
                 if key in self.active_jobs:
                     job = self.active_jobs.pop(key)
                     job.end_time = time.time()
-                    if success:
+                    if was_cancel_request or data.get("cancelled", False):
+                        job.status = RenderStatus.CANCELLED.value
+                        if self.on_output:
+                            slave_name = self.slaves.get(key, SlaveInfo('?', '?', 0)).hostname
+                            self.on_output(f"Job cancelled: {job.project_name} [{job_id}] on {slave_name}")
+                    elif success:
                         job.status = RenderStatus.COMPLETED.value
                         job.progress = 100.0
                         if key in self.slaves:
@@ -328,6 +342,20 @@ class MasterServer:
                     if self.on_output:
                         self.on_output(f"Job cancelled: {job.project_name} [{job_id}] (was reserved for {addr})")
                     self._notify_queue_changed()
+                    return job
+        return None
+
+    def request_job_cancellation(self, job_id: str) -> Optional[RenderJob]:
+        """Request cancellation of an actively rendering job.
+
+        Adds the job ID to the cancel set; the slave picks it up via heartbeat.
+        """
+        with self._lock:
+            for addr, job in self.active_jobs.items():
+                if job.id == job_id:
+                    self._cancel_requests.add(job_id)
+                    if self.on_output:
+                        self.on_output(f"Cancel requested for job: {job.project_name} [{job_id}] on {addr}")
                     return job
         return None
 

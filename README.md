@@ -398,6 +398,10 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 
 ## Changelog
 
+### v1.4.8
+- **Stop Rendering Farm Jobs** - Right-click context menu on actively rendering farm jobs now includes "Stop Rendering" to cancel them remotely via the master-slave heartbeat channel
+- **Extra-smooth Images Default** - The "Extra-smooth images" checkbox is now enabled by default
+
 ### v1.4.7
 - **Send Project Files to Farm** - New option to upload the .moho project file (and optionally all sibling files from the same folder) to the master when submitting farm jobs, so slave machines can render without needing local access to the project
 - **Include Sibling Files** - Checkbox to also send images, audio, and other files from the project folder (root level only, no subfolders)

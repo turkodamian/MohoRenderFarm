@@ -103,7 +103,7 @@ class SlaveClient:
                 with self._lock:
                     active_count = len(self._active_renders)
                 status = "rendering" if active_count > 0 else "idle"
-                requests.post(
+                resp = requests.post(
                     f"{self.master_url}/api/heartbeat",
                     json={
                         "port": self.slave_port,
@@ -112,9 +112,24 @@ class SlaveClient:
                     },
                     timeout=5,
                 )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    for job_id in data.get("cancel_jobs", []):
+                        self._cancel_active_job(job_id)
             except Exception:
                 pass
             time.sleep(10)
+
+    def _cancel_active_job(self, job_id: str):
+        """Cancel a specific active render by job ID (requested by master)."""
+        with self._lock:
+            for worker_id, (renderer, job) in self._active_renders.items():
+                if job.id == job_id:
+                    if self.on_output:
+                        self.on_output(f"Cancelling job by master request: {job.project_name}")
+                    job.status = RenderStatus.CANCELLED.value
+                    renderer.cancel()
+                    return
 
     def _worker_loop(self, worker_id: int):
         """Worker loop: request and process jobs from master."""
@@ -212,6 +227,7 @@ class SlaveClient:
     def _report_completion(self, job: RenderJob):
         """Report job completion to master."""
         success = job.status == RenderStatus.COMPLETED.value
+        cancelled = job.status == RenderStatus.CANCELLED.value
         try:
             requests.post(
                 f"{self.master_url}/api/job_complete",
@@ -219,6 +235,7 @@ class SlaveClient:
                     "port": self.slave_port,
                     "job_id": job.id,
                     "success": success,
+                    "cancelled": cancelled,
                     "error": job.error_message,
                 },
                 timeout=10,

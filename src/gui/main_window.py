@@ -399,6 +399,7 @@ class EditSettingsDialog(QDialog):
         self.chk_aa = QCheckBox("Antialiased edges")
         self.chk_aa.setChecked(True)
         self.chk_extrasmooth = QCheckBox("Extra-smooth images")
+        self.chk_extrasmooth.setChecked(True)
         self.chk_premultiply = QCheckBox("Premultiply alpha")
         self.chk_premultiply.setChecked(True)
         self.chk_ntscsafe = QCheckBox("NTSC safe colors")
@@ -628,7 +629,7 @@ class EditSettingsDialog(QDialog):
         self.chk_layerfx.setChecked(data.get("layerfx", True))
         self.chk_fewparticles.setChecked(data.get("fewparticles", False))
         self.chk_aa.setChecked(data.get("aa", True))
-        self.chk_extrasmooth.setChecked(data.get("extrasmooth", False))
+        self.chk_extrasmooth.setChecked(data.get("extrasmooth", True))
         self.chk_premultiply.setChecked(data.get("premultiply", True))
         self.chk_ntscsafe.setChecked(data.get("ntscsafe", False))
         self.chk_verbose.setChecked(data.get("verbose", True))
@@ -1118,6 +1119,7 @@ class MainWindow(QMainWindow):
         self.chk_aa = QCheckBox("Antialiased edges")
         self.chk_aa.setChecked(True)
         self.chk_extrasmooth = QCheckBox("Extra-smooth images")
+        self.chk_extrasmooth.setChecked(True)
         self.chk_premultiply = QCheckBox("Premultiply alpha")
         self.chk_premultiply.setChecked(True)
         self.chk_ntscsafe = QCheckBox("NTSC safe colors")
@@ -2911,6 +2913,9 @@ class MainWindow(QMainWindow):
             act_cancel.triggered.connect(lambda: self._cancel_farm_job(job_id))
             act_return = menu.addAction("Return to Local Queue")
             act_return.triggered.connect(lambda: self._return_farm_job_to_local(job_id))
+        if status == "RENDERING":
+            act_stop = menu.addAction("Stop Rendering")
+            act_stop.triggered.connect(lambda: self._stop_farm_job(job_id))
         if status in ("COMPLETED", "FAILED", "CANCELLED"):
             act_clear = menu.addAction("Clear Completed Jobs")
             act_clear.triggered.connect(self._clear_completed_farm_jobs)
@@ -2953,6 +2958,14 @@ class MainWindow(QMainWindow):
         if job:
             self._append_farm_log(f"[GUI] Cancelled farm job: {job.project_name} [{job_id}]")
             self._refresh_farm_queue_table()
+
+    def _stop_farm_job(self, job_id):
+        """Request cancellation of an actively rendering farm job."""
+        if not self.master_server:
+            return
+        job = self.master_server.request_job_cancellation(job_id)
+        if job:
+            self._append_farm_log(f"[GUI] Stop requested for: {job.project_name} [{job_id}]")
 
     def _return_farm_job_to_local(self, job_id):
         """Remove a job from the farm and add it back to the local queue."""
@@ -3030,7 +3043,7 @@ class MainWindow(QMainWindow):
         self.chk_layerfx.setChecked(data.get("layerfx", True))
         self.chk_fewparticles.setChecked(data.get("fewparticles", False))
         self.chk_aa.setChecked(data.get("aa", True))
-        self.chk_extrasmooth.setChecked(data.get("extrasmooth", False))
+        self.chk_extrasmooth.setChecked(data.get("extrasmooth", True))
         self.chk_premultiply.setChecked(data.get("premultiply", True))
         self.chk_ntscsafe.setChecked(data.get("ntscsafe", False))
         self.chk_verbose.setChecked(data.get("verbose", True))
