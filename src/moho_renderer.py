@@ -53,6 +53,9 @@ class RenderJob:
     copy_images: bool = False
     compose_layers: bool = False
     compose_reverse_order: bool = False
+    # Farm file transfer
+    farm_files_uploaded: bool = False
+    farm_original_project: str = ""
     # Runtime state
     status: str = RenderStatus.PENDING.value
     progress: float = 0.0

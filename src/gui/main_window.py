@@ -1259,6 +1259,31 @@ class MainWindow(QMainWindow):
         conn_row.addWidget(self.lbl_farm_status)
         mode_layout.addLayout(conn_row)
 
+        # File transfer options
+        file_row = QHBoxLayout()
+        self.chk_send_project_files = QCheckBox("Send project files to farm")
+        self.chk_send_project_files.setToolTip(
+            "Upload the .moho project file to the master when submitting jobs.\n"
+            "Use this when slave machines don't have the project file locally.")
+        self.chk_send_project_files.setChecked(self.config.get("farm_send_project_files", False))
+        file_row.addWidget(self.chk_send_project_files)
+
+        self.chk_send_sibling_files = QCheckBox("Include files from project folder")
+        self.chk_send_sibling_files.setToolTip(
+            "Also send all files in the same folder as the project (images, audio, etc.).\n"
+            "Does NOT include subfolders.")
+        self.chk_send_sibling_files.setChecked(self.config.get("farm_send_sibling_files", False))
+        self.chk_send_sibling_files.setEnabled(self.chk_send_project_files.isChecked())
+        file_row.addWidget(self.chk_send_sibling_files)
+        file_row.addStretch()
+
+        self.chk_send_project_files.toggled.connect(self.chk_send_sibling_files.setEnabled)
+        self.chk_send_project_files.toggled.connect(
+            lambda v: self.config.set("farm_send_project_files", v))
+        self.chk_send_sibling_files.toggled.connect(
+            lambda v: self.config.set("farm_send_sibling_files", v))
+        mode_layout.addLayout(file_row)
+
         layout.addWidget(mode_group)
 
         # Horizontal splitter: Slaves + Farm Queue
@@ -1784,12 +1809,9 @@ class MainWindow(QMainWindow):
 
     def _add_file_to_queue(self, filepath):
         job = self._create_job_from_settings(filepath)
-        if self.chk_auto_send_farm.isChecked() and self.master_server:
-            self.master_server.add_job(job)
+        if self.chk_auto_send_farm.isChecked() and (self.master_server or self.slave_client):
+            self._submit_job_to_farm(job)
             self._append_farm_log(f"[GUI] Auto-sent to farm: {Path(filepath).name}")
-        elif self.chk_auto_send_farm.isChecked() and self.slave_client:
-            self.slave_client.submit_job(job)
-            self._append_farm_log(f"[SLAVE] Submitted to master: {Path(filepath).name}")
         else:
             self.queue.add_job(job)
             self._append_log(f"Added to queue: {Path(filepath).name}")
@@ -2697,10 +2719,7 @@ class MainWindow(QMainWindow):
                 job = self.queue.jobs[row]
                 if job.status == RenderStatus.PENDING.value:
                     farm_job = RenderJob.from_dict(job.to_dict())
-                    if self.master_server:
-                        self.master_server.add_job(farm_job)
-                    elif self.slave_client:
-                        self.slave_client.submit_job(farm_job)
+                    self._submit_job_to_farm(farm_job)
                     self.queue.remove_job(job.id)
                     sent += 1
         if sent:
@@ -2718,10 +2737,7 @@ class MainWindow(QMainWindow):
             return
         for job in list(pending):
             farm_job = RenderJob.from_dict(job.to_dict())
-            if self.master_server:
-                self.master_server.add_job(farm_job)
-            elif self.slave_client:
-                self.slave_client.submit_job(farm_job)
+            self._submit_job_to_farm(farm_job)
             self.queue.remove_job(job.id)
         self._append_farm_log(f"[GUI] Sent {len(pending)} job{'s' if len(pending) > 1 else ''} to farm queue")
 
@@ -2731,19 +2747,64 @@ class MainWindow(QMainWindow):
             return
         for job in list(jobs):
             farm_job = RenderJob.from_dict(job.to_dict())
-            if self.master_server:
-                self.master_server.add_job(farm_job)
-            elif self.slave_client:
-                self.slave_client.submit_job(farm_job)
+            self._submit_job_to_farm(farm_job)
             self.queue.remove_job(job.id)
         self._append_farm_log(f"[GUI] Sent {len(jobs)} job{'s' if len(jobs) > 1 else ''} to farm queue")
 
+    def _prepare_file_bundle(self, job):
+        """Create a zip bundle of the project file and optional siblings.
+
+        Returns path to the temporary zip file, or "" if nothing to bundle.
+        """
+        import zipfile
+        import tempfile
+
+        project_path = Path(job.project_file)
+        if not project_path.exists():
+            self._append_farm_log(f"[GUI] Cannot bundle: file not found: {project_path}")
+            return ""
+
+        # Run copy_images BEFORE collecting files
+        if job.copy_images:
+            from src.moho_renderer import _copy_images_to_root
+            _copy_images_to_root(job, on_output=lambda msg: self._append_farm_log(f"[GUI] {msg}"))
+            job.copy_images = False  # Already done; slave won't have Images subfolder
+
+        fd, zip_path = tempfile.mkstemp(suffix=".zip", prefix=f"farm_{job.id}_")
+        os.close(fd)
+
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.write(str(project_path), project_path.name)
+            if self.chk_send_sibling_files.isChecked():
+                project_dir = project_path.parent
+                for f in project_dir.iterdir():
+                    if f.is_file() and f != project_path:
+                        zf.write(str(f), f.name)
+
+        job.farm_original_project = project_path.name
+        job.farm_files_uploaded = True
+
+        size_mb = os.path.getsize(zip_path) / (1024 * 1024)
+        self._append_farm_log(f"[GUI] Prepared file bundle for {job.project_name}: {size_mb:.1f} MB")
+        return zip_path
+
     def _submit_job_to_farm(self, job):
-        """Submit a single job to the farm via master or slave."""
+        """Submit a single job to the farm via master or slave, with optional file upload."""
+        bundle_path = ""
+        if self.chk_send_project_files.isChecked():
+            bundle_path = self._prepare_file_bundle(job)
+
         if self.master_server:
+            if bundle_path:
+                from src.config import CONFIG_DIR
+                farm_dir = CONFIG_DIR / "farm_files"
+                farm_dir.mkdir(parents=True, exist_ok=True)
+                dest = farm_dir / f"{job.id}.zip"
+                import shutil
+                shutil.move(bundle_path, str(dest))
             self.master_server.add_job(job)
         elif self.slave_client:
-            self.slave_client.submit_job(job)
+            self.slave_client.submit_job(job, bundle_path=bundle_path)
 
     def _add_jobs_to_farm(self):
         """Open file dialog and submit selected .moho files directly to the farm."""

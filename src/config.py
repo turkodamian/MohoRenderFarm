@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 APP_NAME = "Moho Render Farm"
-APP_VERSION = "1.4.6"
+APP_VERSION = "1.4.7"
 APP_AUTHOR = "Damián Turkieh"
 
 DEFAULT_MOHO_PATH = r"C:\Program Files\Moho 14\Moho.exe"
@@ -31,6 +31,8 @@ DEFAULT_CONFIG = {
     "auto_send_to_farm": False,
     "max_local_renders": 1,
     "auto_check_updates": True,
+    "farm_send_project_files": False,
+    "farm_send_sibling_files": False,
 }
 
 FORMATS = [

@@ -3,9 +3,13 @@ import json
 import threading
 import time
 import socket
+from pathlib import Path
 from typing import Optional, Callable, Dict, List
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from src.moho_renderer import RenderJob, RenderStatus
+from src.config import CONFIG_DIR
+
+FARM_FILES_DIR = CONFIG_DIR / "farm_files"
 
 
 class SlaveInfo:
@@ -66,6 +70,8 @@ class MasterServer:
         self.on_farm_queue_changed: Optional[Callable[[], None]] = None
 
         self._app = Flask(__name__)
+        self._app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024 * 1024  # 2 GB
+        FARM_FILES_DIR.mkdir(parents=True, exist_ok=True)
         self._setup_routes()
 
     def _notify_queue_changed(self):
@@ -192,6 +198,9 @@ class MasterServer:
                             self.on_output(f"Job FAILED: {job.project_name} [{job_id}] on {slave_name}: {error}")
 
                     self.completed_jobs.append(job)
+                    # Clean up uploaded files if any
+                    if job.farm_files_uploaded:
+                        self._cleanup_job_files(job.id)
 
                 if key in self.slaves:
                     self.slaves[key].status = "idle"
@@ -231,6 +240,44 @@ class MasterServer:
                 "reserved": reserved,
                 "completed": completed,
             })
+
+        @app.route("/api/upload_files/<job_id>", methods=["POST"])
+        def upload_files(job_id):
+            if "bundle" not in request.files:
+                return jsonify({"error": "No file"}), 400
+            f = request.files["bundle"]
+            dest = FARM_FILES_DIR / f"{job_id}.zip"
+            f.save(str(dest))
+            size = dest.stat().st_size
+            if self.on_output:
+                self.on_output(f"Files received for job {job_id}: {size / 1024 / 1024:.1f} MB")
+            return jsonify({"status": "uploaded", "size": size})
+
+        @app.route("/api/download_files/<job_id>", methods=["GET"])
+        def download_files(job_id):
+            path = FARM_FILES_DIR / f"{job_id}.zip"
+            if not path.exists():
+                return jsonify({"error": "not found"}), 404
+            return send_file(str(path), mimetype="application/zip",
+                             as_attachment=True, download_name=f"{job_id}.zip")
+
+        @app.route("/api/cleanup_files/<job_id>", methods=["DELETE"])
+        def cleanup_files(job_id):
+            path = FARM_FILES_DIR / f"{job_id}.zip"
+            if path.exists():
+                path.unlink()
+                if self.on_output:
+                    self.on_output(f"Cleaned up files for job {job_id}")
+            return jsonify({"status": "deleted"})
+
+    def _cleanup_job_files(self, job_id: str):
+        """Remove uploaded files for a completed job."""
+        path = FARM_FILES_DIR / f"{job_id}.zip"
+        if path.exists():
+            try:
+                path.unlink()
+            except Exception:
+                pass
 
     def add_job(self, job: RenderJob):
         """Add a job to the distribution queue."""

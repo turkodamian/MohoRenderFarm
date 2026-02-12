@@ -1,7 +1,12 @@
 """Slave client for distributed rendering."""
+import os
+import shutil
 import socket
+import tempfile
 import threading
 import time
+import zipfile
+from pathlib import Path
 from typing import Optional, Callable, Dict, Tuple, List
 import requests
 from src.moho_renderer import RenderJob, MohoRenderer, RenderStatus
@@ -155,6 +160,19 @@ class SlaveClient:
 
     def _process_job(self, worker_id: int, job: RenderJob):
         """Process a single render job."""
+        work_dir = None
+
+        # Download project files from master if needed
+        if job.farm_files_uploaded:
+            work_dir = self._download_and_extract_files(worker_id, job)
+            if work_dir is None:
+                job.status = RenderStatus.FAILED.value
+                job.error_message = "Failed to download project files from master"
+                self._report_completion(job)
+                if self.on_job_completed:
+                    self.on_job_completed(job)
+                return
+
         renderer = MohoRenderer(self.moho_path)
         with self._lock:
             self._active_renders[worker_id] = (renderer, job)
@@ -177,6 +195,22 @@ class SlaveClient:
             self._active_renders.pop(worker_id, None)
 
         # Report completion
+        self._report_completion(job)
+
+        # Cleanup downloaded files
+        if work_dir:
+            self._cleanup_work_dir(work_dir, job)
+
+        if self.on_job_completed:
+            self.on_job_completed(job)
+        if self.on_status_changed:
+            with self._lock:
+                count = len(self._active_renders)
+            status = f"rendering ({count} active)" if count > 0 else "idle"
+            self.on_status_changed(status)
+
+    def _report_completion(self, job: RenderJob):
+        """Report job completion to master."""
         success = job.status == RenderStatus.COMPLETED.value
         try:
             requests.post(
@@ -193,19 +227,100 @@ class SlaveClient:
             if self.on_output:
                 self.on_output(f"Error reporting job completion: {e}")
 
-        if self.on_job_completed:
-            self.on_job_completed(job)
-        if self.on_status_changed:
-            with self._lock:
-                count = len(self._active_renders)
-            status = f"rendering ({count} active)" if count > 0 else "idle"
-            self.on_status_changed(status)
+    def _download_and_extract_files(self, worker_id: int, job: RenderJob):
+        """Download project bundle from master and extract to temp dir."""
+        work_dir = Path(tempfile.mkdtemp(prefix=f"moho_farm_{job.id}_"))
+        zip_path = work_dir / f"{job.id}.zip"
 
-    def submit_job(self, job: RenderJob) -> bool:
+        try:
+            if self.on_output:
+                self.on_output(f"Worker {worker_id}: Downloading files for {job.project_name}...")
+
+            resp = requests.get(
+                f"{self.master_url}/api/download_files/{job.id}",
+                timeout=300, stream=True,
+            )
+            if resp.status_code != 200:
+                if self.on_output:
+                    self.on_output(f"Worker {worker_id}: File download failed: HTTP {resp.status_code}")
+                shutil.rmtree(str(work_dir), ignore_errors=True)
+                return None
+
+            with open(str(zip_path), "wb") as f:
+                for chunk in resp.iter_content(chunk_size=65536):
+                    f.write(chunk)
+
+            size_mb = zip_path.stat().st_size / (1024 * 1024)
+
+            with zipfile.ZipFile(str(zip_path), "r") as zf:
+                zf.extractall(str(work_dir))
+            zip_path.unlink()
+
+            # Rewrite job project path to extracted location
+            original_name = job.farm_original_project or Path(job.project_file).name
+            new_project = work_dir / original_name
+            if new_project.exists():
+                job.project_file = str(new_project)
+
+            if self.on_output:
+                self.on_output(f"Worker {worker_id}: Files ready ({size_mb:.1f} MB) in {work_dir}")
+
+            return work_dir
+        except Exception as e:
+            if self.on_output:
+                self.on_output(f"Worker {worker_id}: Download error: {e}")
+            shutil.rmtree(str(work_dir), ignore_errors=True)
+            return None
+
+    def _cleanup_work_dir(self, work_dir, job: RenderJob):
+        """Clean up temp directory and request master cleanup."""
+        try:
+            shutil.rmtree(str(work_dir), ignore_errors=True)
+        except Exception:
+            pass
+        try:
+            requests.delete(
+                f"{self.master_url}/api/cleanup_files/{job.id}",
+                timeout=10,
+            )
+        except Exception:
+            pass
+
+    def submit_job(self, job: RenderJob, bundle_path: str = "") -> bool:
         """Submit a job to the master for rendering by the farm.
 
+        If bundle_path is provided, uploads the file bundle first.
         Returns True if the master accepted the job.
         """
+        # Upload file bundle if provided
+        if bundle_path and os.path.exists(bundle_path):
+            try:
+                if self.on_output:
+                    size_mb = os.path.getsize(bundle_path) / (1024 * 1024)
+                    self.on_output(f"Uploading files for {job.project_name} ({size_mb:.1f} MB)...")
+                with open(bundle_path, "rb") as f:
+                    resp = requests.post(
+                        f"{self.master_url}/api/upload_files/{job.id}",
+                        files={"bundle": (f"{job.id}.zip", f, "application/zip")},
+                        timeout=300,
+                    )
+                if resp.status_code != 200:
+                    if self.on_output:
+                        self.on_output(f"File upload failed: HTTP {resp.status_code}")
+                    return False
+                if self.on_output:
+                    self.on_output(f"Files uploaded for {job.project_name}")
+            except Exception as e:
+                if self.on_output:
+                    self.on_output(f"File upload error: {e}")
+                return False
+            finally:
+                try:
+                    os.unlink(bundle_path)
+                except OSError:
+                    pass
+
+        # Submit job metadata
         try:
             resp = requests.post(
                 f"{self.master_url}/api/add_job",

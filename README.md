@@ -9,7 +9,7 @@ Created by **Damián Turkieh**
 ## Features
 
 - **Batch Rendering** - Queue multiple Moho projects with concurrent rendering support
-- **Render Farm** - Master/Slave network system for distributed rendering across multiple PCs
+- **Render Farm** - Master/Slave network system for distributed rendering across multiple PCs, with project file transfer
 - **Concurrent Rendering** - Configurable max simultaneous renders (local queue and slave mode)
 - **Full GUI** - Dark-themed PyQt6 interface with drag-and-drop support
 - **CLI Automation** - Complete command-line interface for scripting and pipelines
@@ -397,6 +397,12 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 ---
 
 ## Changelog
+
+### v1.4.7
+- **Send Project Files to Farm** - New option to upload the .moho project file (and optionally all sibling files from the same folder) to the master when submitting farm jobs, so slave machines can render without needing local access to the project
+- **Include Sibling Files** - Checkbox to also send images, audio, and other files from the project folder (root level only, no subfolders)
+- **Copy Images Integration** - When "Copy \Images to project root" is enabled, it runs before bundling so all media files are included in the upload
+- **Automatic Cleanup** - Uploaded files are automatically cleaned up on the master and slave after rendering completes
 
 ### v1.4.6
 - **Startup Update Log** - The console now logs "Checking for updates..." when the app starts and auto-check is enabled
