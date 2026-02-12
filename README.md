@@ -23,6 +23,7 @@ Created by **Damián Turkieh**
 - **Project Subfolder Output** - Automatically create subfolders named after each project
 - **Images Copy** - Copy `\Images` media to project root to fix offline media references
 - **Portable Python** - Bundled embeddable Python, no system Python required
+- **Auto-save Queue** - Queue is automatically saved on every change and restored on startup
 - **Auto-Update** - Automatic update checking and installation from GitHub
 - **Windows Integration** - Right-click context menu on .moho files to render or add to queue
 - **Drag & Drop** - Drag .moho files directly onto the application window
@@ -395,6 +396,9 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 ---
 
 ## Changelog
+
+### v1.4.3
+- **Auto-save & Restore Queue** - The render queue is automatically saved on every change (add, remove, edit, reorder). On startup, the previous session's queue is restored automatically, protecting against crashes or accidental closures
 
 ### v1.4.2
 - **Detailed Console Logging** - All user actions now logged: queue operations (add, remove, retry, duplicate, cancel, clear), farm events (master/slave start/stop, slave connect/disconnect), file operations (drag & drop, folder import, IPC), render lifecycle (started, completed with time, failed with error), preset loading, settings changes, and update checks

@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 APP_NAME = "Moho Render Farm"
-APP_VERSION = "1.4.2"
+APP_VERSION = "1.4.3"
 APP_AUTHOR = "Damián Turkieh"
 
 DEFAULT_MOHO_PATH = r"C:\Program Files\Moho 14\Moho.exe"
@@ -12,6 +12,7 @@ CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "MohoRenderFarm"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 QUEUE_DIR = CONFIG_DIR / "queues"
 PRESETS_DIR = CONFIG_DIR / "presets"
+AUTOSAVE_QUEUE_FILE = CONFIG_DIR / "autosave_queue.json"
 
 DEFAULT_CONFIG = {
     "moho_path": DEFAULT_MOHO_PATH,

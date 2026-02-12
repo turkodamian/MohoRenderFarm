@@ -19,7 +19,7 @@ from src.config import (
     AppConfig, APP_NAME, APP_VERSION, APP_AUTHOR,
     FORMATS, WINDOWS_PRESETS, RESOLUTIONS, MOHO_FILE_EXTENSIONS,
     QUALITY_LEVELS, QUEUE_DIR, PRESETS_DIR, CONFIG_DIR,
-    DISCORD_WEBHOOK_URL,
+    DISCORD_WEBHOOK_URL, AUTOSAVE_QUEUE_FILE,
 )
 import json
 from src.moho_renderer import RenderJob, RenderStatus
@@ -836,6 +836,9 @@ class MainWindow(QMainWindow):
             if idx >= 0:
                 self.combo_render_preset.setCurrentIndex(idx)
 
+        # Restore queue from auto-save if available
+        self._load_autosaved_queue()
+
         # Handle initial files from command line / context menu
         if initial_files:
             for f in initial_files:
@@ -1488,6 +1491,7 @@ class MainWindow(QMainWindow):
         # Thread-safe signals
         self.log_signal.connect(self._append_log)
         self.queue_changed_signal.connect(self._refresh_queue_table)
+        self.queue_changed_signal.connect(self._autosave_queue)
         self.progress_signal.connect(self._update_job_progress)
         self.job_status_signal.connect(self._update_job_status)
         self.ipc_files_signal.connect(self._on_ipc_files)
@@ -1923,6 +1927,28 @@ class MainWindow(QMainWindow):
                 self._append_log(f"Queue loaded: {filepath}")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to load queue:\n{e}")
+
+    def _load_autosaved_queue(self):
+        """Restore queue from the auto-save file if it exists."""
+        if not AUTOSAVE_QUEUE_FILE.exists():
+            return
+        try:
+            self.queue.load_queue(str(AUTOSAVE_QUEUE_FILE), append=False)
+            count = len(self.queue.jobs)
+            if count > 0:
+                self._append_log(f"Restored {count} job{'s' if count > 1 else ''} from previous session")
+        except Exception:
+            pass
+
+    def _autosave_queue(self):
+        """Auto-save queue to a recovery file on every change."""
+        try:
+            if self.queue.jobs:
+                self.queue.save_queue(str(AUTOSAVE_QUEUE_FILE))
+            elif AUTOSAVE_QUEUE_FILE.exists():
+                AUTOSAVE_QUEUE_FILE.unlink()
+        except Exception:
+            pass
 
     # --- Delete selected jobs via keyboard ---
     def _delete_selected_jobs(self):
