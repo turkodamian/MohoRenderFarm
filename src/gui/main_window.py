@@ -1326,6 +1326,9 @@ class MainWindow(QMainWindow):
         return widget
 
     def _create_app_settings_tab(self):
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
@@ -1448,7 +1451,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(about_group)
 
         layout.addStretch()
-        return widget
+        scroll.setWidget(widget)
+        return scroll
 
     def _connect_signals(self):
         # Thread-safe signals
