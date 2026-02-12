@@ -19,7 +19,7 @@ from src.config import (
     AppConfig, APP_NAME, APP_VERSION, APP_AUTHOR,
     FORMATS, WINDOWS_PRESETS, RESOLUTIONS, MOHO_FILE_EXTENSIONS,
     QUALITY_LEVELS, QUEUE_DIR, PRESETS_DIR, CONFIG_DIR,
-    BUG_REPORT_FORM_URL, BUG_REPORT_ENTRIES,
+    DISCORD_WEBHOOK_URL,
 )
 import json
 from src.moho_renderer import RenderJob, RenderStatus
@@ -28,13 +28,15 @@ from src.gui.styles import DARK_THEME
 
 
 class BugReportDialog(QDialog):
-    """Dialog for reporting bugs via Google Form."""
+    """Dialog for reporting bugs via Discord webhook."""
+    send_result = pyqtSignal(bool, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Report a Bug")
         self.setMinimumWidth(550)
         self._latest_log = self._find_latest_log()
+        self.send_result.connect(self._on_send_result)
         self._setup_ui()
 
     def _find_latest_log(self):
@@ -80,22 +82,21 @@ class BugReportDialog(QDialog):
         log_row.addStretch()
         layout.addLayout(log_row)
 
-        layout.addWidget(QLabel(
-            "You can also attach screenshots and files directly in the form.",
-            ))
-
         btn_row = QHBoxLayout()
-        btn_send = QPushButton("Open Report Form")
-        btn_send.setObjectName("primaryBtn")
-        btn_send.clicked.connect(self._open_form)
-        btn_row.addWidget(btn_send)
+        self.btn_send = QPushButton("Send Report")
+        self.btn_send.setObjectName("primaryBtn")
+        self.btn_send.clicked.connect(self._send_report)
+        btn_row.addWidget(self.btn_send)
         btn_cancel = QPushButton("Cancel")
         btn_cancel.clicked.connect(self.reject)
         btn_row.addWidget(btn_cancel)
         btn_row.addStretch()
         layout.addLayout(btn_row)
 
-    def _open_form(self):
+        self.lbl_status = QLabel("")
+        layout.addWidget(self.lbl_status)
+
+    def _send_report(self):
         subject = self.edit_subject.text().strip()
         body = self.edit_description.toPlainText().strip()
 
@@ -106,26 +107,87 @@ class BugReportDialog(QDialog):
             QMessageBox.warning(self, "Missing Description", "Please describe the bug.")
             return
 
-        # Append log tail if checked
-        if self.chk_include_log.isChecked() and self._latest_log:
-            try:
-                lines = self._latest_log.read_text(
-                    encoding="utf-8", errors="replace").splitlines()
-                tail = "\n".join(lines[-50:])
-                body += f"\n\n--- Render Log ({self._latest_log.name}) ---\n{tail}"
-            except (IOError, OSError):
-                pass
+        self.btn_send.setEnabled(False)
+        self.lbl_status.setText("Sending report...")
+        self.lbl_status.setStyleSheet("color: #a6adc8;")
 
-        import urllib.parse
-        import webbrowser
-        params = {
-            BUG_REPORT_ENTRIES["subject"]: f"[Bug] {subject}",
-            BUG_REPORT_ENTRIES["description"]: body,
-            BUG_REPORT_ENTRIES["version"]: APP_VERSION,
-        }
-        url = f"{BUG_REPORT_FORM_URL}?usp=pp_url&{urllib.parse.urlencode(params)}"
-        webbrowser.open(url)
-        self.accept()
+        include_log = (self.chk_include_log.isChecked() and self._latest_log)
+        log_path = str(self._latest_log) if include_log else None
+
+        threading.Thread(
+            target=self._do_send, args=(subject, body, log_path),
+            daemon=True).start()
+
+    def _do_send(self, subject, body, log_path):
+        import json as _json
+        import urllib.request
+        try:
+            payload = _json.dumps({
+                "embeds": [{
+                    "title": f"[Bug] {subject}",
+                    "description": body[:4096],
+                    "color": 0xFF0000,
+                    "footer": {"text": f"v{APP_VERSION}"},
+                }]
+            })
+
+            boundary = "----MohoRenderFarmBoundary"
+            parts = []
+
+            # payload_json part
+            parts.append(f"--{boundary}\r\n"
+                         f"Content-Disposition: form-data; name=\"payload_json\"\r\n"
+                         f"Content-Type: application/json\r\n\r\n"
+                         f"{payload}\r\n")
+
+            # File attachment
+            file_data = None
+            if log_path:
+                try:
+                    with open(log_path, "rb") as f:
+                        file_data = f.read()
+                    fname = os.path.basename(log_path)
+                    parts.append(f"--{boundary}\r\n"
+                                 f"Content-Disposition: form-data; name=\"files[0]\"; "
+                                 f"filename=\"{fname}\"\r\n"
+                                 f"Content-Type: text/plain\r\n\r\n")
+                except (IOError, OSError):
+                    pass
+
+            # Build body
+            body_bytes = b""
+            for i, part in enumerate(parts):
+                body_bytes += part.encode("utf-8")
+                if file_data and i == len(parts) - 1:
+                    body_bytes += file_data + b"\r\n"
+            body_bytes += f"--{boundary}--\r\n".encode("utf-8")
+
+            req = urllib.request.Request(
+                DISCORD_WEBHOOK_URL,
+                data=body_bytes,
+                method="POST",
+                headers={
+                    "Content-Type": f"multipart/form-data; boundary={boundary}",
+                    "User-Agent": f"MohoRenderFarm/{APP_VERSION}",
+                },
+            )
+            resp = urllib.request.urlopen(req, timeout=15)
+            if resp.status in (200, 204):
+                self.send_result.emit(True, "Report sent successfully!")
+            else:
+                self.send_result.emit(False, f"Server returned status {resp.status}")
+        except Exception as e:
+            self.send_result.emit(False, f"Failed to send: {e}")
+
+    def _on_send_result(self, success, message):
+        if success:
+            self.lbl_status.setText(message)
+            self.lbl_status.setStyleSheet("color: #a6e3a1;")
+            QTimer.singleShot(1500, self.accept)
+        else:
+            self.lbl_status.setText(message)
+            self.lbl_status.setStyleSheet("color: #f38ba8;")
+            self.btn_send.setEnabled(True)
 
 
 class EditSettingsDialog(QDialog):

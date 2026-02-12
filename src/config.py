@@ -96,13 +96,8 @@ RESOLUTIONS = {
 
 MOHO_FILE_EXTENSIONS = [".moho", ".anime", ".anme"]
 
-# Bug report Google Form (pre-filled URL)
-BUG_REPORT_FORM_URL = "https://docs.google.com/forms/d/e/FORM_ID_HERE/viewform"
-BUG_REPORT_ENTRIES = {
-    "subject": "entry.XXXXXXX",
-    "description": "entry.YYYYYYY",
-    "version": "entry.ZZZZZZZ",
-}
+# Bug report Discord webhook
+DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1471430444892426280/dLk-_95ylUmIFWqW4Zy4WXtjkD6hSt5xwqh_htK_W3IqbCJUeMKzsomCmfn44I8FdB1E"
 
 QUALITY_LEVELS = {
     0: "Minimum",
