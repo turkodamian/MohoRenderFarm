@@ -147,7 +147,7 @@ Set up distributed rendering across multiple PCs:
 
 ### Help Menu
 - **Documentation** - Opens the GitHub README in your browser
-- **Report a Bug** - Opens the GitHub Issues page to submit a bug report
+- **Report a Bug** - Opens a bug report form to send directly to the developer
 - **Check for Updates** - Manually check for and install the latest version
 - **About** - Application info dialog
 

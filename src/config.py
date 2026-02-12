@@ -96,6 +96,14 @@ RESOLUTIONS = {
 
 MOHO_FILE_EXTENSIONS = [".moho", ".anime", ".anme"]
 
+# Bug report Google Form (pre-filled URL)
+BUG_REPORT_FORM_URL = "https://docs.google.com/forms/d/e/FORM_ID_HERE/viewform"
+BUG_REPORT_ENTRIES = {
+    "subject": "entry.XXXXXXX",
+    "description": "entry.YYYYYYY",
+    "version": "entry.ZZZZZZZ",
+}
+
 QUALITY_LEVELS = {
     0: "Minimum",
     1: "Low",

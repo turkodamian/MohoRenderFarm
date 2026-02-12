@@ -19,6 +19,7 @@ from src.config import (
     AppConfig, APP_NAME, APP_VERSION, APP_AUTHOR,
     FORMATS, WINDOWS_PRESETS, RESOLUTIONS, MOHO_FILE_EXTENSIONS,
     QUALITY_LEVELS, QUEUE_DIR, PRESETS_DIR, CONFIG_DIR,
+    BUG_REPORT_FORM_URL, BUG_REPORT_ENTRIES,
 )
 import json
 from src.moho_renderer import RenderJob, RenderStatus
@@ -27,14 +28,24 @@ from src.gui.styles import DARK_THEME
 
 
 class BugReportDialog(QDialog):
-    """Dialog for reporting bugs via email."""
+    """Dialog for reporting bugs via Google Form."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Report a Bug")
         self.setMinimumWidth(550)
-        self.image_path = None
+        self._latest_log = self._find_latest_log()
         self._setup_ui()
+
+    def _find_latest_log(self):
+        log_dir = CONFIG_DIR / "logs"
+        if log_dir.exists():
+            log_files = sorted(
+                log_dir.glob("queue_*.log"),
+                key=lambda f: f.stat().st_mtime, reverse=True)
+            if log_files:
+                return log_files[0]
+        return None
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -53,20 +64,30 @@ class BugReportDialog(QDialog):
         self.edit_description.setMinimumHeight(200)
         layout.addWidget(self.edit_description)
 
-        img_row = QHBoxLayout()
-        self.btn_attach = QPushButton("Attach Screenshot")
-        self.btn_attach.clicked.connect(self._attach_image)
-        img_row.addWidget(self.btn_attach)
-        self.lbl_image = QLabel("No image attached")
-        self.lbl_image.setStyleSheet("color: #a6adc8;")
-        img_row.addWidget(self.lbl_image)
-        img_row.addStretch()
-        layout.addLayout(img_row)
+        # Log attachment
+        log_row = QHBoxLayout()
+        self.chk_include_log = QCheckBox("Include latest render log")
+        if self._latest_log:
+            self.chk_include_log.setChecked(True)
+            log_row.addWidget(self.chk_include_log)
+            lbl_log = QLabel(self._latest_log.name)
+            lbl_log.setStyleSheet("color: #a6adc8;")
+            log_row.addWidget(lbl_log)
+        else:
+            self.chk_include_log.setEnabled(False)
+            self.chk_include_log.setText("Include latest render log (no logs found)")
+            log_row.addWidget(self.chk_include_log)
+        log_row.addStretch()
+        layout.addLayout(log_row)
+
+        layout.addWidget(QLabel(
+            "You can also attach screenshots and files directly in the form.",
+            ))
 
         btn_row = QHBoxLayout()
-        btn_send = QPushButton("Send Report")
+        btn_send = QPushButton("Open Report Form")
         btn_send.setObjectName("primaryBtn")
-        btn_send.clicked.connect(self._send_report)
+        btn_send.clicked.connect(self._open_form)
         btn_row.addWidget(btn_send)
         btn_cancel = QPushButton("Cancel")
         btn_cancel.clicked.connect(self.reject)
@@ -74,16 +95,7 @@ class BugReportDialog(QDialog):
         btn_row.addStretch()
         layout.addLayout(btn_row)
 
-    def _attach_image(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Select Screenshot", "",
-            "Images (*.png *.jpg *.jpeg *.bmp *.gif);;All Files (*)")
-        if path:
-            self.image_path = path
-            self.lbl_image.setText(os.path.basename(path))
-            self.lbl_image.setStyleSheet("color: #a6e3a1;")
-
-    def _send_report(self):
+    def _open_form(self):
         subject = self.edit_subject.text().strip()
         body = self.edit_description.toPlainText().strip()
 
@@ -94,26 +106,25 @@ class BugReportDialog(QDialog):
             QMessageBox.warning(self, "Missing Description", "Please describe the bug.")
             return
 
-        body += f"\n\n---\n{APP_NAME} v{APP_VERSION}"
-
-        if self.image_path:
-            body += f"\n\n[Screenshot: {os.path.basename(self.image_path)}]"
+        # Append log tail if checked
+        if self.chk_include_log.isChecked() and self._latest_log:
+            try:
+                lines = self._latest_log.read_text(
+                    encoding="utf-8", errors="replace").splitlines()
+                tail = "\n".join(lines[-50:])
+                body += f"\n\n--- Render Log ({self._latest_log.name}) ---\n{tail}"
+            except (IOError, OSError):
+                pass
 
         import urllib.parse
         import webbrowser
-        mailto = (f"mailto:damian@realidad360.com.ar"
-                  f"?subject={urllib.parse.quote(f'[Bug] {subject}')}"
-                  f"&body={urllib.parse.quote(body)}")
-        webbrowser.open(mailto)
-
-        if self.image_path:
-            import subprocess
-            subprocess.Popen(f'explorer /select,"{self.image_path}"')
-            QMessageBox.information(
-                self, "Screenshot",
-                "Your email client has been opened.\n\n"
-                "Please attach the screenshot that was highlighted in Explorer.")
-
+        params = {
+            BUG_REPORT_ENTRIES["subject"]: f"[Bug] {subject}",
+            BUG_REPORT_ENTRIES["description"]: body,
+            BUG_REPORT_ENTRIES["version"]: APP_VERSION,
+        }
+        url = f"{BUG_REPORT_FORM_URL}?usp=pp_url&{urllib.parse.urlencode(params)}"
+        webbrowser.open(url)
         self.accept()
 
 
