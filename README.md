@@ -396,6 +396,15 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 
 ## Changelog
 
+### v1.3.5
+- **Bug Report via Discord** - In-app bug report dialog sends directly to Discord with name, email, log, and screenshot attachment
+- **Donate Button** - PayPal donation link in Help menu and App Settings
+- **GPL v3 License** - Open-source license with full third-party attribution
+- **Scrollable App Settings** - Settings tab is now scrollable so all options are accessible
+- **Fixed Button Text Cropping** - Buttons auto-size to fit their text regardless of DPI/font
+- **Log Timestamps** - Log entries now include full date and time (`[YYYY-MM-DD HH:MM:SS]`)
+- **Updated Screenshots** - Refreshed all GUI screenshots at maximized window size
+
 ### v1.3.4
 - **Zero-Install** - Python, FFmpeg, and all dependencies are now bundled in the repository. Just clone/download and run `start.bat` — no installation step required
 - **Removed install.bat** - No longer needed since everything is pre-bundled

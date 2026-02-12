@@ -333,7 +333,7 @@ class EditSettingsDialog(QDialog):
         self.edit_output_dir = QLineEdit()
         self.edit_output_dir.setPlaceholderText("Same folder as project file (default)")
         browse_btn = QPushButton("Browse...")
-        browse_btn.setFixedWidth(80)
+        browse_btn.setFixedWidth(browse_btn.sizeHint().width() + 10)
         browse_btn.clicked.connect(self._browse_output_dir)
         out_row = QHBoxLayout()
         out_row.addWidget(self.edit_output_dir)
@@ -992,7 +992,7 @@ class MainWindow(QMainWindow):
         log_header = QHBoxLayout()
         log_header.addWidget(QLabel("Output Log"))
         self.btn_clear_log = QPushButton("Clear Log")
-        self.btn_clear_log.setFixedWidth(80)
+        self.btn_clear_log.setFixedWidth(self.btn_clear_log.sizeHint().width() + 10)
         log_header.addStretch()
         log_header.addWidget(self.btn_clear_log)
         log_layout.addLayout(log_header)
@@ -1056,7 +1056,7 @@ class MainWindow(QMainWindow):
         default_dir = self.config.get("default_output_dir", "") if self.config.get("default_output_mode", "project") == "custom" else ""
         self.edit_output_dir.setText(default_dir)
         browse_out = QPushButton("Browse...")
-        browse_out.setFixedWidth(80)
+        browse_out.setFixedWidth(browse_out.sizeHint().width() + 10)
         browse_out.clicked.connect(self._browse_output_dir)
         out_row = QHBoxLayout()
         out_row.addWidget(self.edit_output_dir)
@@ -1314,7 +1314,7 @@ class MainWindow(QMainWindow):
         log_header = QHBoxLayout()
         log_header.addStretch()
         self.btn_clear_farm_log = QPushButton("Clear")
-        self.btn_clear_farm_log.setFixedWidth(60)
+        self.btn_clear_farm_log.setFixedWidth(self.btn_clear_farm_log.sizeHint().width() + 10)
         self.btn_clear_farm_log.clicked.connect(lambda: self.farm_log.clear())
         log_header.addWidget(self.btn_clear_farm_log)
         farm_log_layout.addLayout(log_header)
@@ -1339,7 +1339,7 @@ class MainWindow(QMainWindow):
         self.edit_moho_path = QLineEdit()
         self.edit_moho_path.setText(self.config.moho_path)
         browse_moho = QPushButton("Browse...")
-        browse_moho.setFixedWidth(80)
+        browse_moho.setFixedWidth(browse_moho.sizeHint().width() + 10)
         browse_moho.clicked.connect(self._browse_moho)
         moho_row = QHBoxLayout()
         moho_row.addWidget(self.edit_moho_path)
@@ -1369,7 +1369,7 @@ class MainWindow(QMainWindow):
         self.edit_default_output.setText(self.config.get("default_output_dir", ""))
         self.edit_default_output.setPlaceholderText("No custom folder set")
         browse_output = QPushButton("Browse...")
-        browse_output.setFixedWidth(80)
+        browse_output.setFixedWidth(browse_output.sizeHint().width() + 10)
         browse_output.clicked.connect(self._browse_default_output)
         output_row = QHBoxLayout()
         output_row.addWidget(self.edit_default_output)
@@ -1603,7 +1603,7 @@ class MainWindow(QMainWindow):
 
     # --- Slots (run on main thread) ---
     def _append_log(self, msg):
-        timestamp = datetime.now().strftime("[%H:%M:%S]")
+        timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
         line = f"{timestamp} {msg}"
         self.log_output.append(line)
         sb = self.log_output.verticalScrollBar()
@@ -1618,7 +1618,7 @@ class MainWindow(QMainWindow):
 
     def _append_farm_log(self, msg):
         """Append a timestamped message to the Farm Log."""
-        timestamp = datetime.now().strftime("[%H:%M:%S]")
+        timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
         line = f"{timestamp} {msg}"
         self.farm_log.append(line)
         sb = self.farm_log.verticalScrollBar()
@@ -1649,7 +1649,7 @@ class MainWindow(QMainWindow):
             # Format
             self.queue_table.setItem(row, 2, QTableWidgetItem(f"{job.format}"))
             # Layer Comp
-            self.queue_table.setItem(row, 3, QTableWidgetItem(job.layercomp or "(default)"))
+            self.queue_table.setItem(row, 3, QTableWidgetItem(job.layercomp or "No"))
             # Output (clickable)
             out = job.output_path or "(project folder)"
             out_item = QTableWidgetItem(out)
