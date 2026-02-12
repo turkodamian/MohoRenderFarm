@@ -398,6 +398,9 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 
 ## Changelog
 
+### v1.4.6
+- **Startup Update Log** - The console now logs "Checking for updates..." when the app starts and auto-check is enabled
+
 ### v1.4.5
 - **Fixed Update Check** - "Check for Updates" no longer gets stuck on "Checking..." — all outcomes (update found, up to date, error) are now logged in the console
 - **Robust Update Threads** - Background update threads are wrapped in try/except to ensure the UI always recovers even if an unexpected error occurs

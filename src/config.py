@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 APP_NAME = "Moho Render Farm"
-APP_VERSION = "1.4.5"
+APP_VERSION = "1.4.6"
 APP_AUTHOR = "Damián Turkieh"
 
 DEFAULT_MOHO_PATH = r"C:\Program Files\Moho 14\Moho.exe"

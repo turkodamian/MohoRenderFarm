@@ -2529,6 +2529,7 @@ class MainWindow(QMainWindow):
     def _check_update_on_startup(self):
         """Check for updates on startup and ask user before downloading."""
         if self.config.get("auto_check_updates", True):
+            self._append_log("Checking for updates...")
             import threading
             threading.Thread(target=self._do_update_check_only, daemon=True).start()
 
