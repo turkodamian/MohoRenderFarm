@@ -10,10 +10,11 @@ from pathlib import Path
 PYTHON_VERSION = "3.10.11"
 PYTHON_URL = f"https://www.python.org/ftp/python/{PYTHON_VERSION}/python-{PYTHON_VERSION}-embed-amd64.zip"
 GETPIP_URL = "https://bootstrap.pypa.io/get-pip.py"
-PYTHON_DIR = Path(__file__).parent / "python"
-PYTHON_ZIP = Path(__file__).parent / "python-download.zip"
+APP_ROOT = Path(__file__).parent.parent
+PYTHON_DIR = APP_ROOT / "python"
+PYTHON_ZIP = APP_ROOT / "python-download.zip"
 PTH_FILE = PYTHON_DIR / "python310._pth"
-REQUIREMENTS = Path(__file__).parent / "requirements.txt"
+REQUIREMENTS = APP_ROOT / "requirements.txt"
 
 
 def download_with_progress(url, dest):

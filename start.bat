@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 title Moho Render Farm
 echo ============================================
 echo   Moho Render Farm v1.3.3

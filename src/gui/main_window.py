@@ -26,6 +26,97 @@ from src.render_queue import RenderQueue
 from src.gui.styles import DARK_THEME
 
 
+class BugReportDialog(QDialog):
+    """Dialog for reporting bugs via email."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Report a Bug")
+        self.setMinimumWidth(550)
+        self.image_path = None
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+
+        layout.addWidget(QLabel("Subject:"))
+        self.edit_subject = QLineEdit()
+        self.edit_subject.setPlaceholderText("Brief description of the issue")
+        layout.addWidget(self.edit_subject)
+
+        layout.addWidget(QLabel("Description:"))
+        self.edit_description = QTextEdit()
+        self.edit_description.setPlaceholderText(
+            "Describe the bug in detail...\n\n"
+            "Steps to reproduce:\n1. \n2. \n3. \n\n"
+            "Expected behavior:\n\nActual behavior:")
+        self.edit_description.setMinimumHeight(200)
+        layout.addWidget(self.edit_description)
+
+        img_row = QHBoxLayout()
+        self.btn_attach = QPushButton("Attach Screenshot")
+        self.btn_attach.clicked.connect(self._attach_image)
+        img_row.addWidget(self.btn_attach)
+        self.lbl_image = QLabel("No image attached")
+        self.lbl_image.setStyleSheet("color: #a6adc8;")
+        img_row.addWidget(self.lbl_image)
+        img_row.addStretch()
+        layout.addLayout(img_row)
+
+        btn_row = QHBoxLayout()
+        btn_send = QPushButton("Send Report")
+        btn_send.setObjectName("primaryBtn")
+        btn_send.clicked.connect(self._send_report)
+        btn_row.addWidget(btn_send)
+        btn_cancel = QPushButton("Cancel")
+        btn_cancel.clicked.connect(self.reject)
+        btn_row.addWidget(btn_cancel)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+    def _attach_image(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select Screenshot", "",
+            "Images (*.png *.jpg *.jpeg *.bmp *.gif);;All Files (*)")
+        if path:
+            self.image_path = path
+            self.lbl_image.setText(os.path.basename(path))
+            self.lbl_image.setStyleSheet("color: #a6e3a1;")
+
+    def _send_report(self):
+        subject = self.edit_subject.text().strip()
+        body = self.edit_description.toPlainText().strip()
+
+        if not subject:
+            QMessageBox.warning(self, "Missing Subject", "Please enter a subject.")
+            return
+        if not body:
+            QMessageBox.warning(self, "Missing Description", "Please describe the bug.")
+            return
+
+        body += f"\n\n---\n{APP_NAME} v{APP_VERSION}"
+
+        if self.image_path:
+            body += f"\n\n[Screenshot: {os.path.basename(self.image_path)}]"
+
+        import urllib.parse
+        import webbrowser
+        mailto = (f"mailto:damian@realidad360.com.ar"
+                  f"?subject={urllib.parse.quote(f'[Bug] {subject}')}"
+                  f"&body={urllib.parse.quote(body)}")
+        webbrowser.open(mailto)
+
+        if self.image_path:
+            import subprocess
+            subprocess.Popen(f'explorer /select,"{self.image_path}"')
+            QMessageBox.information(
+                self, "Screenshot",
+                "Your email client has been opened.\n\n"
+                "Please attach the screenshot that was highlighted in Explorer.")
+
+        self.accept()
+
+
 class EditSettingsDialog(QDialog):
     """Dialog for editing render settings of one or more queued jobs."""
 
@@ -1297,8 +1388,7 @@ class MainWindow(QMainWindow):
         help_menu.addAction(act_docs)
 
         act_bug = QAction("Report a Bug", self)
-        act_bug.triggered.connect(lambda: __import__("webbrowser").open(
-            "https://github.com/turkodamian/MohoRenderFarm/issues/new"))
+        act_bug.triggered.connect(self._report_bug)
         help_menu.addAction(act_bug)
 
         help_menu.addSeparator()
@@ -2009,6 +2099,11 @@ class MainWindow(QMainWindow):
         if self.config.get("auto_check_updates", True):
             import threading
             threading.Thread(target=self._do_update_check, daemon=True).start()
+
+    def _report_bug(self):
+        """Open bug report dialog."""
+        dlg = BugReportDialog(self)
+        dlg.exec()
 
     def _show_about(self):
         """Show About dialog."""

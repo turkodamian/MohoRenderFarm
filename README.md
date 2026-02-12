@@ -167,7 +167,7 @@ When rendering with layer comps (e.g., `AllLayerComps`) and the **Auto-compose**
 
 ### Requirements
 
-FFmpeg is downloaded automatically by `install.bat` or `python setup_ffmpeg.py`. No manual installation needed.
+FFmpeg is downloaded automatically by `install.bat` or `python scripts/setup_ffmpeg.py`. No manual installation needed.
 
 ---
 
@@ -345,8 +345,9 @@ MohoRenderFarm/
 ├── start.bat               # Quick launcher
 ├── install.bat             # Installer
 ├── requirements.txt        # Python dependencies
-├── setup_python.py         # Portable Python auto-downloader
-├── setup_ffmpeg.py         # FFmpeg auto-downloader
+├── scripts/
+│   ├── setup_python.py     # Portable Python auto-downloader
+│   └── setup_ffmpeg.py     # FFmpeg auto-downloader
 ├── python/                 # Portable Python (auto-downloaded)
 ├── ffmpeg/                 # FFmpeg binaries (auto-downloaded)
 │   ├── ffmpeg.exe          # FFmpeg encoder

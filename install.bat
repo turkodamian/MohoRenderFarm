@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 title Moho Render Farm - Installer
 echo ============================================
 echo   Moho Render Farm - Installer
@@ -20,7 +21,7 @@ if exist "%~dp0python\python.exe" (
 :: Try using system Python to bootstrap portable Python
 where python >nul 2>&1
 if %errorlevel% equ 0 (
-    python setup_python.py
+    python scripts\setup_python.py
     if exist "%~dp0python\python.exe" (
         set "PYTHON=%~dp0python\python.exe"
         goto :deps
@@ -79,7 +80,7 @@ echo   Dependencies installed successfully.
 :: Step 3: Download FFmpeg
 echo.
 echo [3/5] Setting up FFmpeg...
-"%PYTHON%" setup_ffmpeg.py
+"%PYTHON%" scripts\setup_ffmpeg.py
 if %errorlevel% neq 0 (
     echo   WARNING: FFmpeg setup failed.
     echo   Layer comp auto-composition will not be available.
