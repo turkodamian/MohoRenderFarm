@@ -404,6 +404,9 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 - **Log Timestamps** - Log entries now include full date and time (`[YYYY-MM-DD HH:MM:SS]`)
 - **Updated Screenshots** - Refreshed all GUI screenshots at maximized window size
 
+### v1.3.7
+- **Default Options** - "Create subfolder with project name" and "Copy \Images to project root" are now enabled by default
+
 ### v1.3.6
 - **Context Menu Fix** - Right-click menu now works on PCs with Moho installed by registering under existing ProgIDs and SystemFileAssociations
 - **Slave Connection Status** - Status label now correctly shows connected/disconnected state

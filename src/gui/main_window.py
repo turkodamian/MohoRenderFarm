@@ -341,6 +341,7 @@ class EditSettingsDialog(QDialog):
         output_form.addRow("Output Folder:", out_row)
 
         self.chk_subfolder_project = QCheckBox("Create subfolder with project name")
+        self.chk_subfolder_project.setChecked(True)
         output_form.addRow("", self.chk_subfolder_project)
 
         self.output_group.setEnabled(False)
@@ -417,6 +418,7 @@ class EditSettingsDialog(QDialog):
         options_grid.addWidget(self.chk_verbose, 3, 1)
 
         self.chk_copy_images = QCheckBox("Copy \\Images to project root (fix offline media)")
+        self.chk_copy_images.setChecked(True)
         options_grid.addWidget(self.chk_copy_images, 4, 0, 1, 3)
 
         self.options_group.setEnabled(False)
@@ -1065,6 +1067,7 @@ class MainWindow(QMainWindow):
         output_form.addRow("Output Folder:", out_row)
 
         self.chk_subfolder_project = QCheckBox("Create subfolder with project name")
+        self.chk_subfolder_project.setChecked(True)
         output_form.addRow("", self.chk_subfolder_project)
 
         layout.addWidget(output_group)
@@ -1131,6 +1134,7 @@ class MainWindow(QMainWindow):
         options_grid.addWidget(self.chk_verbose, 3, 1)
 
         self.chk_copy_images = QCheckBox("Copy \\Images to project root (fix offline media)")
+        self.chk_copy_images.setChecked(True)
         options_grid.addWidget(self.chk_copy_images, 4, 0, 1, 3)
 
         layout.addWidget(options_group)
