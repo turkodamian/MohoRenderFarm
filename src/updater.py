@@ -186,7 +186,7 @@ def apply_staged_update():
 
     Returns True if the script was launched.
     """
-    if not UPDATE_SCRIPT.exists() or not STAGING_DIR.exists():
+    if not STAGING_DIR.exists():
         return False
 
     # Write the script with current process PID so it waits for us
