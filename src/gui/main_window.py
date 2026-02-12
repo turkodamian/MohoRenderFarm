@@ -797,6 +797,7 @@ class MainWindow(QMainWindow):
     job_status_signal = pyqtSignal(str, str)  # job_id, status
     ipc_files_signal = pyqtSignal(list)  # files from another instance
     farm_log_signal = pyqtSignal(str)  # farm-specific log messages
+    farm_status_signal = pyqtSignal(str, str)  # text, color for farm status label
     farm_queue_changed_signal = pyqtSignal()  # farm queue needs refresh
     find_master_signal = pyqtSignal(str)  # found master IP or empty string
     update_check_signal = pyqtSignal(str)  # new version or empty string
@@ -1469,6 +1470,7 @@ class MainWindow(QMainWindow):
         self.job_status_signal.connect(self._update_job_status)
         self.ipc_files_signal.connect(self._on_ipc_files)
         self.farm_log_signal.connect(self._append_farm_log)
+        self.farm_status_signal.connect(self._update_farm_status)
         self.farm_queue_changed_signal.connect(self._refresh_farm_queue_table)
         self.find_master_signal.connect(self._on_master_found)
         self.update_check_signal.connect(self._on_update_result)
@@ -1622,6 +1624,11 @@ class MainWindow(QMainWindow):
                 self._log_file_handle.flush()
             except (IOError, OSError):
                 pass
+
+    def _update_farm_status(self, text, color):
+        """Update the farm status label (thread-safe via signal)."""
+        self.lbl_farm_status.setText(text)
+        self.lbl_farm_status.setStyleSheet(f"color: {color}; font-weight: bold;")
 
     def _append_farm_log(self, msg):
         """Append a timestamped message to the Farm Log."""
@@ -2314,7 +2321,12 @@ class MainWindow(QMainWindow):
         self.slave_client = SlaveClient(host, port, moho, slave_port=port + 1,
                                         max_concurrent=self.config.get("max_local_renders", 1))
         self.slave_client.on_output = lambda msg: self.farm_log_signal.emit(f"[SLAVE] {msg}")
-        self.slave_client.on_status_changed = lambda s: self.lbl_farm_status.setText(f"Slave: {s}")
+        self.slave_client.on_connected = lambda: self.farm_status_signal.emit(
+            f"Slave connected to {host}:{port}", "#a6e3a1")
+        self.slave_client.on_disconnected = lambda: self.farm_status_signal.emit(
+            f"Slave disconnected from {host}:{port}", "#f38ba8")
+        self.slave_client.on_status_changed = lambda s: self.farm_status_signal.emit(
+            f"Slave: {s}", "#a6e3a1")
         self.slave_client.start()
 
         self.btn_start_slave.setEnabled(False)
