@@ -395,6 +395,10 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 
 ## Changelog
 
+### v1.3.8
+- **Fixed Auto-Update on Windows** - Update now uses a staged approach: downloads to a staging directory, then applies the update via a batch script after the app exits, avoiding "Access Denied" errors from locked DLLs
+- **Update Error Handling** - Update dialog now correctly shows failure status instead of misleading "Update Installed" message
+
 ### v1.3.5
 - **Bug Report via Discord** - In-app bug report dialog sends directly to Discord with name, email, log, and screenshot attachment
 - **Donate Button** - PayPal donation link in Help menu and App Settings

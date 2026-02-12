@@ -802,7 +802,7 @@ class MainWindow(QMainWindow):
     farm_status_signal = pyqtSignal(str, str)  # text, color for farm status label
     farm_queue_changed_signal = pyqtSignal()  # farm queue needs refresh
     find_master_signal = pyqtSignal(str)  # found master IP or empty string
-    update_check_signal = pyqtSignal(str)  # new version or empty string
+    update_check_signal = pyqtSignal(str, bool)  # (version, success)
 
     def __init__(self, config: AppConfig, initial_files=None, add_to_queue_files=None):
         super().__init__()
@@ -2271,26 +2271,44 @@ class MainWindow(QMainWindow):
         threading.Thread(target=self._do_update_check, daemon=True).start()
 
     def _do_update_check(self):
-        """Background thread: check for update and auto-install if found."""
-        from src.updater import check_for_update, download_and_install_update
+        """Background thread: check for update and stage it if found."""
+        from src.updater import check_for_update, download_and_stage_update
         new_version = check_for_update(APP_VERSION)
+        success = False
         if new_version:
-            download_and_install_update(
+            success = download_and_stage_update(
                 on_progress=lambda msg: self.log_signal.emit(msg))
-        self.update_check_signal.emit(new_version or "")
+        self.update_check_signal.emit(new_version or "", success)
 
-    def _on_update_result(self, version):
+    def _on_update_result(self, version, success):
         """Handle update check result (GUI thread)."""
         self.btn_check_update.setEnabled(True)
-        if version:
-            self.lbl_update_status.setText(f"Updated to v{version} — restart to apply")
+        if version and success:
+            self.lbl_update_status.setText(f"v{version} ready — restart to apply")
             self.lbl_update_status.setStyleSheet("color: #a6e3a1; font-weight: bold;")
-            QMessageBox.information(self, "Update Installed",
-                                   f"Moho Render Farm has been updated to v{version}.\n\n"
-                                   "Please restart the application to apply the update.")
+            reply = QMessageBox.question(
+                self, "Update Ready",
+                f"Moho Render Farm v{version} has been downloaded.\n\n"
+                "Restart now to apply the update?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes)
+            if reply == QMessageBox.StandardButton.Yes:
+                self._apply_update_and_restart()
+        elif version and not success:
+            self.lbl_update_status.setText(f"v{version} available — download failed")
+            self.lbl_update_status.setStyleSheet("color: #f38ba8;")
         else:
             self.lbl_update_status.setText("You are up to date")
             self.lbl_update_status.setStyleSheet("color: #a6adc8;")
+
+    def _apply_update_and_restart(self):
+        """Launch the update script and close the app."""
+        from src.updater import apply_staged_update
+        if apply_staged_update():
+            self._append_log("Applying update and restarting...")
+            QApplication.instance().quit()
+        else:
+            self._append_log("Failed to launch update script")
 
     def _check_update_on_startup(self):
         """Silently check for updates on startup."""

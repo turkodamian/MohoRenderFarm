@@ -18,3 +18,5 @@ test_output/
 nul
 prompt.txt
 .claude/
+_update_staging/
+_apply_update.bat
