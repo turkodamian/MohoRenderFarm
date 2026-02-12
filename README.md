@@ -127,7 +127,8 @@ Set up distributed rendering across multiple PCs:
 1. **Master PC**: Click "Start Master" - it will listen for slave connections
 2. **Slave PCs**: Click **Find Master** to auto-detect, or manually enter the master's IP and port, then click "Start Slave"
 3. Add jobs to the local queue, then use **Send to Farm** / **Send All to Farm** to push them to the farm queue
-4. Slaves automatically pull and render jobs from the farm queue
+4. **Any machine can submit jobs** - Use "Add Jobs to Farm" or "Add Folder to Farm" directly from the Farm tab, works from both master and slave machines
+5. Slaves automatically pull and render jobs from the farm queue
 5. **Auto-send** checkbox: new queue jobs go directly to the farm when master is running
 6. **Manual assignment**: Right-click a slave to assign a specific job, or right-click a farm job to assign it to a specific slave
 7. **Farm Job Queue table**: Shows all farm jobs with color-coded status (pending/reserved/rendering/completed/failed)
@@ -397,6 +398,10 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 
 ### v1.4.2
 - **Detailed Console Logging** - All user actions now logged: queue operations (add, remove, retry, duplicate, cancel, clear), farm events (master/slave start/stop, slave connect/disconnect), file operations (drag & drop, folder import, IPC), render lifecycle (started, completed with time, failed with error), preset loading, settings changes, and update checks
+- **Fixed Update Script Launch** - Fixed "failed to launch update script" error caused by a stale file existence check during restart-to-update flow
+
+### v1.4.1
+- **Resizable Slave Hostname Column** - The Hostname column in the Connected Slaves table can now be freely resized by the user, like all other columns
 
 ### v1.4.0
 - **Slave Job Submission** - Slaves can now submit render jobs to the master, not just receive them
