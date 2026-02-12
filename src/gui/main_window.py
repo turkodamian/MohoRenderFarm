@@ -813,9 +813,9 @@ class MainWindow(QMainWindow):
         self.queue.on_output = self._emit_log
         self.queue.on_queue_changed = self._emit_queue_changed
         self.queue.on_progress = self._emit_progress
-        self.queue.on_job_started = lambda j: self._emit_job_status(j.id, "rendering")
-        self.queue.on_job_completed = lambda j: self._emit_job_status(j.id, "completed")
-        self.queue.on_job_failed = lambda j: self._emit_job_status(j.id, "failed")
+        self.queue.on_job_started = lambda j: (self._emit_job_status(j.id, "rendering"), self._emit_log(f"[{j.id}] Rendering: {j.project_name}"))
+        self.queue.on_job_completed = lambda j: (self._emit_job_status(j.id, "completed"), self._emit_log(f"[{j.id}] Completed: {j.project_name} ({j.elapsed_str})"))
+        self.queue.on_job_failed = lambda j: (self._emit_job_status(j.id, "failed"), self._emit_log(f"[{j.id}] Failed: {j.project_name} - {j.error_message}"))
         self.queue.on_queue_completed = self._on_queue_completed
 
         # Network components
@@ -1503,7 +1503,7 @@ class MainWindow(QMainWindow):
         self.btn_start_queue.clicked.connect(self._start_queue)
         self.btn_pause_queue.clicked.connect(self._pause_queue)
         self.btn_stop_queue.clicked.connect(self._stop_queue)
-        self.btn_clear_completed.clicked.connect(self.queue.clear_completed)
+        self.btn_clear_completed.clicked.connect(lambda: (self.queue.clear_completed(), self._append_log("Cleared completed jobs")))
         self.btn_clear_all.clicked.connect(self._clear_all_confirm)
         self.btn_save_queue.clicked.connect(self._save_queue)
         self.btn_load_queue.clicked.connect(self._load_queue)
@@ -1582,7 +1582,7 @@ class MainWindow(QMainWindow):
         queue_menu.addAction(act_remove)
 
         act_clear_done = QAction("Clear Completed", self)
-        act_clear_done.triggered.connect(self.queue.clear_completed)
+        act_clear_done.triggered.connect(lambda: (self.queue.clear_completed(), self._append_log("Cleared completed jobs")))
         queue_menu.addAction(act_clear_done)
 
         # Help menu
@@ -1749,6 +1749,8 @@ class MainWindow(QMainWindow):
                         count += 1
             if count == 0:
                 QMessageBox.information(self, "No Projects", "No Moho project files found in the selected folder.")
+            else:
+                self._append_log(f"Added {count} project{'s' if count > 1 else ''} from folder: {Path(folder).name}")
 
     def _add_file_to_queue(self, filepath):
         job = self._create_job_from_settings(filepath)
@@ -1896,6 +1898,7 @@ class MainWindow(QMainWindow):
             )
             if reply == QMessageBox.StandardButton.Yes:
                 self.queue.clear_all()
+                self._append_log("Cleared all jobs from queue")
 
     # --- Queue save/load ---
     def _save_queue(self):
@@ -1940,6 +1943,7 @@ class MainWindow(QMainWindow):
             return
         for job in removable:
             self.queue.remove_job(job.id)
+        self._append_log(f"Removed {len(removable)} job{'s' if len(removable) > 1 else ''} from queue")
 
     def _confirm_remove_job(self, job_id):
         """Remove a single job after confirmation."""
@@ -1952,6 +1956,7 @@ class MainWindow(QMainWindow):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
+            self._append_log(f"Removed from queue: {job.project_name}")
             self.queue.remove_job(job_id)
 
     # --- Context menu for queue table ---
@@ -1983,9 +1988,9 @@ class MainWindow(QMainWindow):
 
         if job.status in (RenderStatus.FAILED.value, RenderStatus.CANCELLED.value, RenderStatus.COMPLETED.value):
             act_retry = menu.addAction("Retry")
-            act_retry.triggered.connect(lambda: self.queue.retry_job(job.id))
+            act_retry.triggered.connect(lambda: (self.queue.retry_job(job.id), self._append_log(f"Retrying job: {job.project_name}")))
         act_dup = menu.addAction("Duplicate")
-        act_dup.triggered.connect(lambda: self.queue.duplicate_job(job.id))
+        act_dup.triggered.connect(lambda: (self.queue.duplicate_job(job.id), self._append_log(f"Duplicated job: {job.project_name}")))
         menu.addSeparator()
         act_up = menu.addAction("Move Up")
         act_up.triggered.connect(lambda: self.queue.move_job(job.id, -1))
@@ -1996,7 +2001,7 @@ class MainWindow(QMainWindow):
         act_remove.triggered.connect(lambda: self._confirm_remove_job(job.id))
         if job.status == RenderStatus.RENDERING.value:
             act_cancel = menu.addAction("Cancel Render")
-            act_cancel.triggered.connect(self.queue.cancel_current)
+            act_cancel.triggered.connect(lambda: (self.queue.cancel_current(), self._append_log(f"Cancelling render: {job.project_name}")))
 
         # Send to Farm option for pending jobs
         pending_selected = [j for j in selected_jobs if j.status == RenderStatus.PENDING.value]
@@ -2077,6 +2082,7 @@ class MainWindow(QMainWindow):
                     return
 
     def dropEvent(self, event: QDropEvent):
+        count = 0
         for url in event.mimeData().urls():
             path = url.toLocalFile()
             p = Path(path)
@@ -2084,8 +2090,12 @@ class MainWindow(QMainWindow):
                 for f in p.rglob("*"):
                     if f.suffix.lower() in MOHO_FILE_EXTENSIONS:
                         self._add_file_to_queue(str(f))
+                        count += 1
             elif p.suffix.lower() in MOHO_FILE_EXTENSIONS:
                 self._add_file_to_queue(str(p))
+                count += 1
+        if count:
+            self._append_log(f"Added {count} project{'s' if count > 1 else ''} via drag & drop")
         event.acceptProposedAction()
 
     # --- AllComps toggle ---
@@ -2128,6 +2138,7 @@ class MainWindow(QMainWindow):
         if filepath:
             self.edit_moho_path.setText(filepath)
             self.config.moho_path = filepath
+            self._append_log(f"Moho path set to: {filepath}")
 
     def _browse_default_output(self):
         folder = QFileDialog.getExistingDirectory(self, "Select Default Output Folder")
@@ -2155,8 +2166,10 @@ class MainWindow(QMainWindow):
         try:
             from src.utils.context_menu import register_context_menu
             if register_context_menu():
+                self._append_log("Context menu registered for .moho/.anime/.anme files")
                 QMessageBox.information(self, "Success", "Context menu registered successfully!")
             else:
+                self._append_log("Failed to register context menu")
                 QMessageBox.warning(self, "Error", "Failed to register context menu.")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error: {e}")
@@ -2165,6 +2178,7 @@ class MainWindow(QMainWindow):
         try:
             from src.utils.context_menu import unregister_context_menu
             unregister_context_menu()
+            self._append_log("Context menu entries removed")
             QMessageBox.information(self, "Success", "Context menu entries removed.")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error: {e}")
@@ -2175,8 +2189,8 @@ class MainWindow(QMainWindow):
         port = self.spin_port.value()
         self.master_server = MasterServer(port=port)
         self.master_server.on_output = lambda msg: self.farm_log_signal.emit(f"[MASTER] {msg}")
-        self.master_server.on_slave_connected = lambda s: self._refresh_slaves()
-        self.master_server.on_slave_disconnected = lambda s: self._refresh_slaves()
+        self.master_server.on_slave_connected = lambda s: (self._refresh_slaves(), self.farm_log_signal.emit(f"[MASTER] Slave connected: {s}"))
+        self.master_server.on_slave_disconnected = lambda s: (self._refresh_slaves(), self.farm_log_signal.emit(f"[MASTER] Slave disconnected: {s}"))
         self.master_server.on_job_completed = lambda j, s: self.farm_queue_changed_signal.emit()
         self.master_server.on_job_failed = lambda j, s: self.farm_queue_changed_signal.emit()
         self.master_server.on_farm_queue_changed = lambda: self.farm_queue_changed_signal.emit()
@@ -2188,6 +2202,7 @@ class MainWindow(QMainWindow):
         ip = self.master_server.get_local_ip()
         self.lbl_farm_status.setText(f"Master running on {ip}:{port}")
         self.lbl_farm_status.setStyleSheet("color: #a6e3a1; font-weight: bold;")
+        self._append_farm_log(f"[MASTER] Started on {ip}:{port}")
         self.config.set("network_port", port)
 
         # Timer to refresh slaves table
@@ -2203,6 +2218,7 @@ class MainWindow(QMainWindow):
     def _stop_master(self):
         self.config.set("auto_send_to_farm", self.chk_auto_send_farm.isChecked())
         if self.master_server:
+            self._append_farm_log("[MASTER] Stopped")
             self.master_server.stop()
             self.master_server = None
         if hasattr(self, '_slave_timer'):
@@ -2288,6 +2304,7 @@ class MainWindow(QMainWindow):
         self.btn_check_update.setEnabled(False)
         self.lbl_update_status.setText("Checking for updates...")
         self.lbl_update_status.setStyleSheet("color: #89b4fa;")
+        self._append_log("Checking for updates...")
         import threading
         threading.Thread(target=self._do_update_check_only, daemon=True).start()
 
@@ -2397,11 +2414,13 @@ class MainWindow(QMainWindow):
         self.btn_start_master.setEnabled(False)
         self.lbl_farm_status.setText(f"Slave connecting to {host}:{port}...")
         self.lbl_farm_status.setStyleSheet("color: #89b4fa; font-weight: bold;")
+        self._append_farm_log(f"[SLAVE] Connecting to {host}:{port}...")
         self.config.set("network_master_host", host)
         self.config.set("network_port", port)
 
     def _stop_slave(self):
         if self.slave_client:
+            self._append_farm_log("[SLAVE] Stopped")
             self.slave_client.stop()
             self.slave_client = None
         self.btn_start_slave.setEnabled(True)
@@ -2732,6 +2751,7 @@ class MainWindow(QMainWindow):
         if not self.master_server:
             return
         self.master_server.clear_completed_farm_jobs()
+        self._append_farm_log("[GUI] Cleared completed farm jobs")
         self._refresh_farm_queue_table()
 
     # --- Render Presets ---
@@ -2761,6 +2781,8 @@ class MainWindow(QMainWindow):
                 data = json.load(f)
         except (json.JSONDecodeError, IOError):
             return
+
+        self._append_log(f"Loaded preset: {name}")
 
         # Output settings
         self.combo_format.setCurrentText(data.get("format", "MP4"))
@@ -3020,9 +3042,13 @@ class MainWindow(QMainWindow):
 
     def _on_ipc_files(self, files):
         """Handle files received from another instance via IPC."""
+        count = 0
         for f in files:
             if os.path.exists(f):
                 self._add_file_to_queue(f)
+                count += 1
+        if count:
+            self._append_log(f"Received {count} file{'s' if count > 1 else ''} from another instance")
         # Bring window to front
         self.showNormal()
         self.activateWindow()

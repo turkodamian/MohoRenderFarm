@@ -395,6 +395,9 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 
 ## Changelog
 
+### v1.4.2
+- **Detailed Console Logging** - All user actions now logged: queue operations (add, remove, retry, duplicate, cancel, clear), farm events (master/slave start/stop, slave connect/disconnect), file operations (drag & drop, folder import, IPC), render lifecycle (started, completed with time, failed with error), preset loading, settings changes, and update checks
+
 ### v1.4.0
 - **Slave Job Submission** - Slaves can now submit render jobs to the master, not just receive them
 - **Farm Tab Buttons** - "Add Jobs to Farm" and "Add Folder to Farm" buttons for submitting jobs directly from any machine
