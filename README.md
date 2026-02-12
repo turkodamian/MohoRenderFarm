@@ -398,6 +398,9 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 
 ## Changelog
 
+### v1.5.2
+- **Fix Context Menu File Association** - Register/unregister context menu no longer creates HKCU registry overrides that break the .moho file association with Moho software. Also cleans up leftover keys from previous versions.
+
 ### v1.5.1
 - **Force Update All Slaves** - Master can force all connected slaves to download the latest version, restart, and auto-reconnect without any user intervention on the slave side
 - **Auto-reconnect After Update** - Slaves automatically reconnect to the same master after a forced update restart

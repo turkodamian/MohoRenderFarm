@@ -91,7 +91,12 @@ def _register_shell_commands(type_key_path, python, app_path):
 
 
 def register_context_menu():
-    """Register right-click context menu entries for .moho files."""
+    """Register right-click context menu entries for .moho files.
+
+    IMPORTANT: Never creates or modifies HKCU\\Software\\Classes\\.moho (or .anime/.anme)
+    to avoid overriding the system-level file association with Moho software.
+    Uses only existing ProgIDs and SystemFileAssociations.
+    """
     python = get_python_path()
     app_path = get_app_path()
     extensions = [".moho", ".anime", ".anme"]
@@ -106,20 +111,7 @@ def register_context_menu():
                 _register_shell_commands(path, python, app_path)
                 registered_paths.append(path)
 
-            # 2) Register under our own ProgID as fallback
-            our_progid = f"MohoProject{ext}"
-            our_path = f"Software\\Classes\\{our_progid}"
-            if our_progid not in existing:
-                with winreg.CreateKey(winreg.HKEY_CURRENT_USER, f"Software\\Classes\\{ext}") as key:
-                    # Only set default if no existing association
-                    if not existing:
-                        winreg.SetValue(key, "", winreg.REG_SZ, our_progid)
-                with winreg.CreateKey(winreg.HKEY_CURRENT_USER, our_path) as key:
-                    winreg.SetValue(key, "", winreg.REG_SZ, "Moho Animation Project")
-                _register_shell_commands(our_path, python, app_path)
-                registered_paths.append(our_path)
-
-            # 3) Register under SystemFileAssociations (reliable fallback)
+            # 2) Register under SystemFileAssociations (reliable, never affects file association)
             sfa_path = f"Software\\Classes\\SystemFileAssociations\\{ext}"
             _register_shell_commands(sfa_path, python, app_path)
             registered_paths.append(sfa_path)
@@ -133,15 +125,24 @@ def register_context_menu():
 
 
 def unregister_context_menu():
-    """Remove right-click context menu entries."""
+    """Remove right-click context menu entries.
+
+    Also cleans up any HKCU extension key overrides left by previous versions
+    that may have broken the system-level Moho file association.
+    """
     extensions = [".moho", ".anime", ".anme"]
 
     for ext in extensions:
-        # Remove from our custom ProgID
-        _delete_key_recursive(winreg.HKEY_CURRENT_USER,
-                              f"Software\\Classes\\MohoProject{ext}")
+        our_progid = f"MohoProject{ext}"
 
-        # Remove from all existing ProgIDs
+        # Clean up HKCU extension key if it points to our ProgID (left by old versions)
+        _cleanup_hkcu_extension_key(ext, our_progid)
+
+        # Remove our custom ProgID entirely
+        _delete_key_recursive(winreg.HKEY_CURRENT_USER,
+                              f"Software\\Classes\\{our_progid}")
+
+        # Remove our shell commands from all existing ProgIDs
         for progid in _get_existing_progids(ext):
             _delete_shell_commands(winreg.HKEY_CURRENT_USER,
                                    f"Software\\Classes\\{progid}")
@@ -152,6 +153,29 @@ def unregister_context_menu():
 
     print("Context menu entries removed")
     return True
+
+
+def _cleanup_hkcu_extension_key(ext, our_progid):
+    """Remove HKCU extension key override if it was created by us.
+
+    Previous versions created HKCU\\Software\\Classes\\.moho which shadows the
+    system-level (HKLM) file association. Remove it if it points to our ProgID
+    or is empty, restoring the original Moho association.
+    """
+    hkcu_ext_path = f"Software\\Classes\\{ext}"
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, hkcu_ext_path, 0,
+                            winreg.KEY_READ) as key:
+            try:
+                default_val = winreg.QueryValue(key, "")
+            except OSError:
+                default_val = ""
+
+            # Only delete if it points to our ProgID or is empty
+            if default_val in (our_progid, ""):
+                _delete_key_recursive(winreg.HKEY_CURRENT_USER, hkcu_ext_path)
+    except OSError:
+        pass
 
 
 def _delete_shell_commands(root, base_path):
@@ -177,15 +201,7 @@ def _delete_key_recursive(root, path):
 
 def is_context_menu_registered():
     """Check if context menu is already registered."""
-    # Check our custom ProgID
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
-                            "Software\\Classes\\MohoProject.moho\\shell\\MohoRenderFarm"):
-            return True
-    except OSError:
-        pass
-
-    # Check SystemFileAssociations fallback
+    # Check SystemFileAssociations (primary method)
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
                             "Software\\Classes\\SystemFileAssociations\\.moho\\shell\\MohoRenderFarm"):
