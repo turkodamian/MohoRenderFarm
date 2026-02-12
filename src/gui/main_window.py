@@ -1438,6 +1438,13 @@ class MainWindow(QMainWindow):
         about_layout.addWidget(QLabel(f"Created by {APP_AUTHOR}"))
         about_layout.addWidget(QLabel("Contact: damian@realidad360.com.ar"))
         about_layout.addWidget(QLabel("Batch rendering tool for Moho Animation v14"))
+        donate_row = QHBoxLayout()
+        btn_donate = QPushButton("Donate via PayPal")
+        btn_donate.clicked.connect(lambda: __import__("webbrowser").open(
+            "https://www.paypal.me/realidad360"))
+        donate_row.addWidget(btn_donate)
+        donate_row.addStretch()
+        about_layout.addLayout(donate_row)
         layout.addWidget(about_group)
 
         layout.addStretch()
@@ -1554,6 +1561,11 @@ class MainWindow(QMainWindow):
         act_bug = QAction("Report a Bug", self)
         act_bug.triggered.connect(self._report_bug)
         help_menu.addAction(act_bug)
+
+        act_donate = QAction("Donate", self)
+        act_donate.triggered.connect(lambda: __import__("webbrowser").open(
+            "https://www.paypal.me/realidad360"))
+        help_menu.addAction(act_donate)
 
         help_menu.addSeparator()
 

@@ -474,3 +474,31 @@ If you find this project useful, consider supporting its development:
 Copyright (c) 2025 Damián Turkieh
 
 This project is licensed under the [GNU General Public License v3.0](LICENSE). You are free to use, modify, and distribute this software under the terms of the GPL v3.
+
+---
+
+## Third-Party Licenses
+
+This project includes the following open-source software:
+
+| Library | License | Copyright |
+|---------|---------|-----------|
+| [PyQt6](https://riverbankcomputing.com/software/pyqt/) | GPL v3 | Copyright (c) 2025 Riverbank Computing Limited |
+| [Qt 6](https://www.qt.io/) | LGPL v3 | Copyright (c) The Qt Company Ltd |
+| [Flask](https://palletsprojects.com/p/flask/) | BSD 3-Clause | Copyright (c) 2010 Pallets |
+| [Werkzeug](https://palletsprojects.com/p/werkzeug/) | BSD 3-Clause | Copyright (c) 2007 Pallets |
+| [Jinja2](https://palletsprojects.com/p/jinja/) | BSD 3-Clause | Copyright (c) 2007 Pallets |
+| [Click](https://palletsprojects.com/p/click/) | BSD 3-Clause | Copyright (c) 2014 Pallets |
+| [MarkupSafe](https://palletsprojects.com/p/markupsafe/) | BSD 3-Clause | Copyright (c) 2010 Pallets |
+| [ItsDangerous](https://palletsprojects.com/p/itsdangerous/) | BSD 3-Clause | Copyright (c) 2011 Pallets |
+| [Requests](https://requests.readthedocs.io/) | Apache 2.0 | Copyright (c) Kenneth Reitz |
+| [urllib3](https://urllib3.readthedocs.io/) | MIT | Copyright (c) 2008-2020 Andrey Petrov |
+| [certifi](https://github.com/certifi/python-certifi) | MPL 2.0 | Copyright (c) Kenneth Reitz |
+| [charset-normalizer](https://github.com/Ousret/charset_normalizer) | MIT | Copyright (c) 2025 Ahmed Tahri |
+| [idna](https://github.com/kjd/idna) | BSD 3-Clause | Copyright (c) 2013-2025 Kim Davies |
+| [Blinker](https://blinker.readthedocs.io/) | MIT | Copyright (c) 2010 Jason Kirtland |
+| [Colorama](https://github.com/tartley/colorama) | BSD 3-Clause | Copyright (c) 2010 Jonathan Hartley |
+| [PyQt6-SIP](https://riverbankcomputing.com/software/sip/) | BSD 2-Clause | Copyright (c) 2025 Phil Thompson |
+| [FFmpeg](https://ffmpeg.org/) | GPL v3 | Copyright (c) FFmpeg developers |
+
+Full license texts are included with each library in the `lib/` directory.
