@@ -116,9 +116,6 @@ def download_and_stage_update(on_progress: Optional[Callable[[str], None]] = Non
             else:
                 shutil.copy2(src, dst)
 
-        # Write the batch script that applies the update after app exits
-        _write_update_script()
-
         if on_progress:
             on_progress("Update downloaded — restart to apply")
 
@@ -143,46 +140,30 @@ def download_and_stage_update(on_progress: Optional[Callable[[str], None]] = Non
             pass
 
 
-def _write_update_script():
+def _write_update_script(pid: int):
     """Write a batch script that copies staged files to app root after exit."""
     app_root = str(APP_ROOT)
     staging = str(STAGING_DIR)
     python_exe = str(APP_ROOT / "python" / "pythonw.exe")
     main_py = str(APP_ROOT / "main.py")
 
-    # Build list of skip dirs for the batch script
-    skip_dirs_str = " ".join(f'"{d}"' for d in SKIP_DIRS)
-
     script = f'''@echo off
 chcp 65001 >nul 2>&1
-setlocal enabledelayedexpansion
 
-:: Wait for the app to close (up to 30 seconds)
+:: Wait for the app process (PID {pid}) to exit (up to 30 seconds)
 set WAITED=0
 :wait_loop
-tasklist /FI "IMAGENAME eq pythonw.exe" 2>nul | find /i "pythonw.exe" >nul
+tasklist /FI "PID eq {pid}" /NH 2>nul | findstr /B "{pid} " >nul 2>&1
 if not errorlevel 1 (
-    if !WAITED! lss 30 (
-        timeout /t 1 /nobreak >nul
+    if %WAITED% LSS 30 (
+        ping -n 2 127.0.0.1 >nul 2>&1
         set /a WAITED+=1
         goto wait_loop
     )
 )
 
-:: Also wait for python.exe
-set WAITED=0
-:wait_loop2
-tasklist /FI "IMAGENAME eq python.exe" 2>nul | find /i "python.exe" >nul
-if not errorlevel 1 (
-    if !WAITED! lss 10 (
-        timeout /t 1 /nobreak >nul
-        set /a WAITED+=1
-        goto wait_loop2
-    )
-)
-
-:: Small extra delay to ensure file handles are released
-timeout /t 2 /nobreak >nul
+:: Extra delay for file handles to release
+ping -n 4 127.0.0.1 >nul 2>&1
 
 :: Copy staged files to app root
 xcopy "{staging}\\*" "{app_root}\\" /E /Y /I /Q >nul 2>&1
@@ -194,7 +175,7 @@ rmdir /S /Q "{staging}" >nul 2>&1
 start "" "{python_exe}" "{main_py}"
 
 :: Delete this script
-del "%~f0"
+(goto) 2>nul & del "%~f0"
 '''
     with open(str(UPDATE_SCRIPT), "w", encoding="utf-8") as f:
         f.write(script)
@@ -208,11 +189,18 @@ def apply_staged_update():
     if not UPDATE_SCRIPT.exists() or not STAGING_DIR.exists():
         return False
 
+    # Write the script with current process PID so it waits for us
+    _write_update_script(os.getpid())
+
     try:
-        # Launch the batch script detached from this process
+        # Launch hidden: use STARTUPINFO to hide the console window
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 0  # SW_HIDE
         subprocess.Popen(
             ["cmd.exe", "/c", str(UPDATE_SCRIPT)],
-            creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
+            startupinfo=si,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
             close_fds=True,
         )
         return True
@@ -222,7 +210,7 @@ def apply_staged_update():
 
 def has_staged_update() -> bool:
     """Check if there's a staged update waiting to be applied."""
-    return STAGING_DIR.exists() and UPDATE_SCRIPT.exists()
+    return STAGING_DIR.exists()
 
 
 def clean_staged_update():
