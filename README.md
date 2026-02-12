@@ -398,6 +398,13 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 
 ## Changelog
 
+### v1.5.3
+- **Auto-Compose** - New button to select a folder with layer comp PNG sequences and compose them into MP4 via FFmpeg, added as a queue task
+- **Skip Status** - Right-click context menu to skip/unskip jobs, preventing them from rendering while keeping them in the queue (shown in purple)
+- **Presets Column** - New dropdown column in Render Queue to view and change the render settings preset per job
+- **Fix Column Resize** - All table columns (Render Queue, Farm Job Queue, Slaves) are now user-resizable with proper drag behavior
+- **Farm Output Click on Slave** - Output column in Farm Job Queue is now clickable on slave machines to open the output folder in Explorer
+
 ### v1.5.2
 - **Fix Context Menu File Association** - Register/unregister context menu no longer creates HKCU registry overrides that break the .moho file association with Moho software. Also cleans up leftover keys from previous versions.
 

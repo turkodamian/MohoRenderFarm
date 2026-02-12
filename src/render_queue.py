@@ -200,42 +200,46 @@ class RenderQueue:
                 # No pending jobs left, worker exits
                 break
 
-            # Create renderer for this worker
-            renderer = MohoRenderer(self.moho_path)
-            with self._lock:
-                self._active_renders[worker_id] = (renderer, next_job)
-
             if self.on_job_started:
                 self.on_job_started(next_job)
 
-            def _on_progress(progress, _job=next_job):
-                _job.progress = progress
-                if self.on_progress:
-                    self.on_progress(_job, progress)
+            if next_job.project_file:
+                # Normal Moho render
+                renderer = MohoRenderer(self.moho_path)
+                with self._lock:
+                    self._active_renders[worker_id] = (renderer, next_job)
 
-            renderer.render(
-                next_job,
-                on_output=self.on_output,
-                on_complete=None,
-                on_progress=_on_progress,
-            )
+                def _on_progress(progress, _job=next_job):
+                    _job.progress = progress
+                    if self.on_progress:
+                        self.on_progress(_job, progress)
 
-            with self._lock:
-                self._active_renders.pop(worker_id, None)
+                renderer.render(
+                    next_job,
+                    on_output=self.on_output,
+                    on_complete=None,
+                    on_progress=_on_progress,
+                )
 
-            # Post-render: auto-compose layer comps with ffmpeg
-            if (next_job.status == RenderStatus.COMPLETED.value
-                    and next_job.compose_layers and next_job.layercomp):
-                try:
-                    from src.ffmpeg_compose import compose_layer_comps
-                    out_dir = Path(next_job.output_path).parent if next_job.output_path else Path(next_job.project_file).parent
-                    if self.on_output:
-                        self.on_output(f"[{next_job.id}] Starting ffmpeg layer composition...")
-                    compose_layer_comps(str(out_dir), on_output=self.on_output,
-                                        reverse_order=next_job.compose_reverse_order)
-                except Exception as e:
-                    if self.on_output:
-                        self.on_output(f"[{next_job.id}] FFmpeg compose error: {e}")
+                with self._lock:
+                    self._active_renders.pop(worker_id, None)
+
+                # Post-render: auto-compose layer comps with ffmpeg
+                if (next_job.status == RenderStatus.COMPLETED.value
+                        and next_job.compose_layers and next_job.layercomp):
+                    try:
+                        from src.ffmpeg_compose import compose_layer_comps
+                        out_dir = Path(next_job.output_path).parent if next_job.output_path else Path(next_job.project_file).parent
+                        if self.on_output:
+                            self.on_output(f"[{next_job.id}] Starting ffmpeg layer composition...")
+                        compose_layer_comps(str(out_dir), on_output=self.on_output,
+                                            reverse_order=next_job.compose_reverse_order)
+                    except Exception as e:
+                        if self.on_output:
+                            self.on_output(f"[{next_job.id}] FFmpeg compose error: {e}")
+            else:
+                # Compose-only job (no project file)
+                self._run_compose_only(next_job)
 
             if next_job.status == RenderStatus.COMPLETED.value:
                 if self.on_job_completed:
@@ -260,6 +264,33 @@ class RenderQueue:
 
         if all_done and self.on_queue_completed:
             self.on_queue_completed()
+
+    def _run_compose_only(self, job: RenderJob):
+        """Run an FFmpeg compose-only job (no Moho render)."""
+        import time as _time
+        job.start_time = _time.time()
+        try:
+            from src.ffmpeg_compose import compose_layer_comps
+            if self.on_output:
+                self.on_output(f"[{job.id}] Starting ffmpeg layer composition: {job.output_path}")
+            result = compose_layer_comps(
+                str(job.output_path),
+                on_output=self.on_output,
+                reverse_order=job.compose_reverse_order,
+            )
+            job.end_time = _time.time()
+            if result:
+                job.status = RenderStatus.COMPLETED.value
+                job.progress = 100.0
+            else:
+                job.status = RenderStatus.FAILED.value
+                job.error_message = "FFmpeg composition failed"
+        except Exception as e:
+            job.end_time = _time.time()
+            job.status = RenderStatus.FAILED.value
+            job.error_message = str(e)
+            if self.on_output:
+                self.on_output(f"[{job.id}] FFmpeg compose error: {e}")
 
     def save_queue(self, filepath: str):
         """Save the queue to a JSON file."""

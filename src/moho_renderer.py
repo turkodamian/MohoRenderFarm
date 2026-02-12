@@ -17,6 +17,7 @@ class RenderStatus(Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    SKIPPED = "skipped"
 
 
 @dataclass
@@ -53,6 +54,7 @@ class RenderJob:
     copy_images: bool = False
     compose_layers: bool = False
     compose_reverse_order: bool = False
+    preset_name: str = ""
     # Farm file transfer
     farm_files_uploaded: bool = False
     farm_original_project: str = ""

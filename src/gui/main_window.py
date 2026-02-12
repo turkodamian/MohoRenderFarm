@@ -965,6 +965,13 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.btn_send_to_farm)
         controls.addWidget(self.btn_send_all_to_farm)
 
+        controls.addSpacing(20)
+
+        self.btn_auto_compose = QPushButton("Auto-Compose")
+        self.btn_auto_compose.setToolTip("Select a folder with layer comp PNG sequences to compose into MP4")
+        self.btn_auto_compose.clicked.connect(self._auto_compose)
+        controls.addWidget(self.btn_auto_compose)
+
         controls.addStretch()
 
         self.btn_save_queue = QPushButton("Save Queue")
@@ -976,13 +983,24 @@ class MainWindow(QMainWindow):
 
         # Queue table
         self.queue_table = QTableWidget()
-        self.queue_table.setColumnCount(9)
+        self.queue_table.setColumnCount(10)
         self.queue_table.setHorizontalHeaderLabels([
             "Status", "Project", "Format", "Layer Comp", "Output", "Progress",
-            "Time", "Slave", "ID"
+            "Time", "Slave", "Preset", "ID"
         ])
-        self.queue_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.queue_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        header = self.queue_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
+        self.queue_table.setColumnWidth(0, 80)    # Status
+        self.queue_table.setColumnWidth(1, 200)   # Project
+        self.queue_table.setColumnWidth(2, 55)    # Format
+        self.queue_table.setColumnWidth(3, 90)    # Layer Comp
+        self.queue_table.setColumnWidth(4, 200)   # Output
+        self.queue_table.setColumnWidth(5, 65)    # Progress
+        self.queue_table.setColumnWidth(6, 75)    # Time
+        self.queue_table.setColumnWidth(7, 75)    # Slave
+        self.queue_table.setColumnWidth(8, 120)   # Preset
+        self.queue_table.setColumnHidden(9, True)  # ID hidden
         self.queue_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.queue_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.queue_table.setAlternatingRowColors(True)
@@ -1304,7 +1322,15 @@ class MainWindow(QMainWindow):
         self.slaves_table.setHorizontalHeaderLabels([
             "Hostname", "IP:Port", "Status", "Current Job", "Completed", "Failed"
         ])
-        self.slaves_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        sl_header = self.slaves_table.horizontalHeader()
+        sl_header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        sl_header.setStretchLastSection(True)
+        self.slaves_table.setColumnWidth(0, 120)
+        self.slaves_table.setColumnWidth(1, 120)
+        self.slaves_table.setColumnWidth(2, 70)
+        self.slaves_table.setColumnWidth(3, 200)
+        self.slaves_table.setColumnWidth(4, 75)
+        self.slaves_table.setColumnWidth(5, 60)
         self.slaves_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.slaves_table.setAlternatingRowColors(True)
         self.slaves_table.verticalHeader().setVisible(False)
@@ -1323,7 +1349,17 @@ class MainWindow(QMainWindow):
         self.farm_queue_table.setHorizontalHeaderLabels([
             "Status", "Project", "Format", "Assigned Slave", "Progress", "Time", "Output", "ID"
         ])
-        self.farm_queue_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        fq_header = self.farm_queue_table.horizontalHeader()
+        fq_header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        fq_header.setStretchLastSection(True)
+        self.farm_queue_table.setColumnWidth(0, 90)    # Status
+        self.farm_queue_table.setColumnWidth(1, 200)   # Project
+        self.farm_queue_table.setColumnWidth(2, 55)    # Format
+        self.farm_queue_table.setColumnWidth(3, 120)   # Assigned Slave
+        self.farm_queue_table.setColumnWidth(4, 65)    # Progress
+        self.farm_queue_table.setColumnWidth(5, 75)    # Time
+        self.farm_queue_table.setColumnWidth(6, 150)   # Output
+        self.farm_queue_table.setColumnHidden(7, True)  # ID hidden
         self.farm_queue_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.farm_queue_table.setAlternatingRowColors(True)
         self.farm_queue_table.verticalHeader().setVisible(False)
@@ -1734,19 +1770,23 @@ class MainWindow(QMainWindow):
 
         for row, job in enumerate(jobs):
             # Status
-            status_item = QTableWidgetItem(job.status.upper())
+            is_compose = not job.project_file and job.compose_layers
+            status_text = "COMPOSE" if (is_compose and job.status == RenderStatus.PENDING.value) else job.status.upper()
+            status_item = QTableWidgetItem(status_text)
             color_map = {
                 "pending": "#f9e2af",
                 "rendering": "#89b4fa",
                 "completed": "#a6e3a1",
                 "failed": "#f38ba8",
                 "cancelled": "#6c7086",
+                "skipped": "#cba6f7",
             }
             status_item.setForeground(QColor(color_map.get(job.status, "#cdd6f4")))
             self.queue_table.setItem(row, 0, status_item)
 
             # Project
-            proj_item = QTableWidgetItem(job.project_name)
+            proj_text = job.project_name or "(compose)"
+            proj_item = QTableWidgetItem(proj_text)
             self.queue_table.setItem(row, 1, proj_item)
             link_font = QFont()
             link_font.setUnderline(True)
@@ -1767,8 +1807,16 @@ class MainWindow(QMainWindow):
             self.queue_table.setItem(row, 6, QTableWidgetItem(job.elapsed_str))
             # Slave
             self.queue_table.setItem(row, 7, QTableWidgetItem(job.assigned_slave or "Local"))
-            # ID (store job_id)
-            self.queue_table.setItem(row, 8, QTableWidgetItem(job.id))
+            # Preset (combo box)
+            combo = QComboBox()
+            combo.addItem("(none)")
+            for f in sorted(PRESETS_DIR.glob("*.json")):
+                combo.addItem(f.stem)
+            combo.setCurrentText(job.preset_name or "(none)")
+            combo.currentTextChanged.connect(lambda name, j=job: self._apply_preset_to_job(j, name))
+            self.queue_table.setCellWidget(row, 8, combo)
+            # ID (hidden col 9)
+            self.queue_table.setItem(row, 9, QTableWidgetItem(job.id))
 
         # Update global progress
         total = self.queue.total_jobs
@@ -1784,7 +1832,7 @@ class MainWindow(QMainWindow):
 
     def _update_job_progress(self, job_id, progress):
         for row in range(self.queue_table.rowCount()):
-            id_item = self.queue_table.item(row, 8)
+            id_item = self.queue_table.item(row, 9)
             if id_item and id_item.text() == job_id:
                 self.queue_table.setItem(row, 5, QTableWidgetItem(f"{progress:.0f}%"))
                 # Also update elapsed time
@@ -1889,6 +1937,11 @@ class MainWindow(QMainWindow):
             depth_val = self.spin_depth.value()
             if depth_val != 24:
                 job.depth = depth_val
+
+        # Store current render preset name
+        current_preset = self.combo_render_preset.currentText()
+        if current_preset and current_preset != "(none)":
+            job.preset_name = current_preset
 
         return job
 
@@ -2076,6 +2129,19 @@ class MainWindow(QMainWindow):
         if job.status in (RenderStatus.FAILED.value, RenderStatus.CANCELLED.value, RenderStatus.COMPLETED.value):
             act_retry = menu.addAction("Retry")
             act_retry.triggered.connect(lambda: (self.queue.retry_job(job.id), self._append_log(f"Retrying job: {job.project_name}")))
+
+        # Skip / Unskip
+        skippable = [j for j in selected_jobs if j.status == RenderStatus.PENDING.value]
+        unskippable = [j for j in selected_jobs if j.status == RenderStatus.SKIPPED.value]
+        if skippable:
+            n = len(skippable)
+            act_skip = menu.addAction(f"Skip ({n} job{'s' if n > 1 else ''})")
+            act_skip.triggered.connect(lambda: self._set_jobs_skip(skippable, True))
+        if unskippable:
+            n = len(unskippable)
+            act_unskip = menu.addAction(f"Unskip ({n} job{'s' if n > 1 else ''})")
+            act_unskip.triggered.connect(lambda: self._set_jobs_skip(unskippable, False))
+
         act_dup = menu.addAction("Duplicate")
         act_dup.triggered.connect(lambda: (self.queue.duplicate_job(job.id), self._append_log(f"Duplicated job: {job.project_name}")))
         menu.addSeparator()
@@ -2118,6 +2184,88 @@ class MainWindow(QMainWindow):
             else:
                 # No output path = project folder
                 self._open_in_explorer(os.path.dirname(job.project_file))
+
+    def _set_jobs_skip(self, jobs, skip):
+        """Set or unset skip status for selected jobs."""
+        for j in jobs:
+            j.status = RenderStatus.SKIPPED.value if skip else RenderStatus.PENDING.value
+        action = "Skipped" if skip else "Unskipped"
+        names = ", ".join(j.project_name or j.id for j in jobs)
+        self._append_log(f"{action}: {names}")
+        if self.queue.on_queue_changed:
+            self.queue.on_queue_changed()
+
+    def _apply_preset_to_job(self, job, preset_name):
+        """Apply a render preset to a job from the queue table dropdown."""
+        if preset_name == "(none)" or not preset_name:
+            job.preset_name = ""
+            return
+        preset_file = PRESETS_DIR / f"{preset_name}.json"
+        if not preset_file.exists():
+            return
+        try:
+            with open(preset_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, IOError):
+            return
+        job.preset_name = preset_name
+        job.format = data.get("format", job.format)
+        job.options = data.get("options", job.options)
+        if data.get("output_dir"):
+            name = Path(job.project_file).stem if job.project_file else ""
+            ext_map = {
+                "JPEG": ".jpg", "TGA": ".tga", "BMP": ".bmp",
+                "PNG": ".png", "PSD": ".psd", "QT": ".mov",
+                "MP4": ".mp4", "Animated GIF": ".gif",
+            }
+            ext = ext_map.get(job.format, ".mp4")
+            subfolder = data.get("subfolder_project", False)
+            if subfolder and name:
+                job.output_path = os.path.join(data["output_dir"], name, name + ext)
+            elif name:
+                job.output_path = os.path.join(data["output_dir"], name + ext)
+        job.subfolder_project = data.get("subfolder_project", job.subfolder_project)
+        if data.get("custom_frames", False):
+            job.start_frame = data.get("start_frame", job.start_frame)
+            job.end_frame = data.get("end_frame", job.end_frame)
+        job.multithread = data.get("multithread", job.multithread)
+        job.halfsize = data.get("halfsize", job.halfsize)
+        job.halffps = data.get("halffps", job.halffps)
+        job.shapefx = data.get("shapefx", job.shapefx)
+        job.layerfx = data.get("layerfx", job.layerfx)
+        job.fewparticles = data.get("fewparticles", job.fewparticles)
+        job.aa = data.get("aa", job.aa)
+        job.extrasmooth = data.get("extrasmooth", job.extrasmooth)
+        job.premultiply = data.get("premultiply", job.premultiply)
+        job.ntscsafe = data.get("ntscsafe", job.ntscsafe)
+        job.verbose = data.get("verbose", job.verbose)
+        job.copy_images = data.get("copy_images", job.copy_images)
+        lc = data.get("layercomp", "")
+        if lc:
+            job.layercomp = lc
+        job.addlayercompsuffix = data.get("addlayercompsuffix", job.addlayercompsuffix)
+        job.createfolderforlayercomps = data.get("createfolderforlayercomps", job.createfolderforlayercomps)
+        job.addformatsuffix = data.get("addformatsuffix", job.addformatsuffix)
+        job.compose_layers = data.get("compose_layers", job.compose_layers)
+        job.compose_reverse_order = data.get("compose_reverse_order", job.compose_reverse_order)
+        self._append_log(f"Applied preset '{preset_name}' to: {job.project_name or job.id}")
+        if self.queue.on_queue_changed:
+            self.queue.on_queue_changed()
+
+    def _auto_compose(self):
+        """Add an FFmpeg compose-only job to the queue."""
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select Folder with Layer Comp PNG Sequences")
+        if not folder:
+            return
+        job = RenderJob()
+        job.project_file = ""
+        job.output_path = folder
+        job.format = "MP4"
+        job.compose_layers = True
+        job.compose_reverse_order = self.chk_compose_reverse.isChecked()
+        self.queue.add_job(job)
+        self._append_log(f"Added compose job: {Path(folder).name}")
 
     def _open_in_explorer(self, filepath):
         """Open Windows Explorer at the given path."""
@@ -3093,22 +3241,29 @@ class MainWindow(QMainWindow):
 
     def _on_farm_queue_cell_clicked(self, row, col):
         """Handle clicks on Output (col 6) to open Explorer for farm jobs."""
-        if col != 6 or row < 0 or not self.master_server:
+        if col != 6 or row < 0:
             return
         id_item = self.farm_queue_table.item(row, 7)
         if not id_item:
             return
         job_id = id_item.text()
-        # Find job in master server
-        all_jobs = self.master_server.get_all_farm_jobs()
+
         job = None
-        for group in all_jobs.values():
-            for j in group:
-                if j.id == job_id:
-                    job = j
+        if self.master_server:
+            # Find job in master server
+            all_jobs = self.master_server.get_all_farm_jobs()
+            for group in all_jobs.values():
+                for j in group:
+                    if j.id == job_id:
+                        job = j
+                        break
+                if job:
                     break
-            if job:
-                break
+        elif self.slave_client:
+            # Find job in slave's active + completed jobs
+            all_jobs = list(self.slave_client.current_jobs) + list(self.slave_client.completed_jobs)
+            job = next((j for j in all_jobs if j.id == job_id), None)
+
         if not job:
             return
         if job.output_path:
@@ -3117,7 +3272,7 @@ class MainWindow(QMainWindow):
                 self._open_in_explorer(str(p) if p.exists() else str(p.parent))
             else:
                 self._open_in_explorer(str(p))
-        else:
+        elif job.project_file:
             self._open_in_explorer(os.path.dirname(job.project_file))
 
     def _return_farm_job_to_local(self, job_id):
@@ -3345,7 +3500,7 @@ class MainWindow(QMainWindow):
             return
         job_map = {j.id: j for j in current_jobs}
         for row in range(self.queue_table.rowCount()):
-            id_item = self.queue_table.item(row, 8)
+            id_item = self.queue_table.item(row, 9)
             if id_item and id_item.text() in job_map:
                 job = job_map[id_item.text()]
                 self.queue_table.setItem(row, 5, QTableWidgetItem(f"{job.progress:.0f}%"))
