@@ -2284,27 +2284,31 @@ class MainWindow(QMainWindow):
             self.lbl_farm_status.setStyleSheet("color: #f38ba8; font-weight: bold;")
 
     def _check_for_update(self):
-        """Check for app updates from GitHub."""
+        """Check for app updates from GitHub (manual button)."""
         self.btn_check_update.setEnabled(False)
         self.lbl_update_status.setText("Checking for updates...")
         self.lbl_update_status.setStyleSheet("color: #89b4fa;")
         import threading
-        threading.Thread(target=self._do_update_check, daemon=True).start()
+        threading.Thread(target=self._do_update_check_only, daemon=True).start()
 
-    def _do_update_check(self):
-        """Background thread: check for update and stage it if found."""
-        from src.updater import check_for_update, download_and_stage_update
+    def _do_update_check_only(self):
+        """Background thread: only check if an update exists (don't download)."""
+        from src.updater import check_for_update
         new_version = check_for_update(APP_VERSION)
-        success = False
-        if new_version:
-            success = download_and_stage_update(
-                on_progress=lambda msg: self.log_signal.emit(msg))
-        self.update_check_signal.emit(new_version or "", success)
+        self.update_check_signal.emit(new_version or "", False)
 
-    def _on_update_result(self, version, success):
-        """Handle update check result (GUI thread)."""
+    def _do_download_update(self, version):
+        """Background thread: download and stage the update."""
+        from src.updater import download_and_stage_update
+        success = download_and_stage_update(
+            on_progress=lambda msg: self.log_signal.emit(msg))
+        self.update_check_signal.emit(version, success)
+
+    def _on_update_result(self, version, downloaded):
+        """Handle update check/download result (GUI thread)."""
         self.btn_check_update.setEnabled(True)
-        if version and success:
+        if version and downloaded:
+            # Update downloaded and staged — offer restart
             self.lbl_update_status.setText(f"v{version} ready — restart to apply")
             self.lbl_update_status.setStyleSheet("color: #a6e3a1; font-weight: bold;")
             reply = QMessageBox.question(
@@ -2315,9 +2319,25 @@ class MainWindow(QMainWindow):
                 QMessageBox.StandardButton.Yes)
             if reply == QMessageBox.StandardButton.Yes:
                 self._apply_update_and_restart()
-        elif version and not success:
-            self.lbl_update_status.setText(f"v{version} available — download failed")
-            self.lbl_update_status.setStyleSheet("color: #f38ba8;")
+        elif version and not downloaded:
+            # Update found — ask user if they want to download
+            self.lbl_update_status.setText(f"v{version} available")
+            self.lbl_update_status.setStyleSheet("color: #f9e2af; font-weight: bold;")
+            reply = QMessageBox.question(
+                self, "Update Available",
+                f"Moho Render Farm v{version} is available (current: v{APP_VERSION}).\n\n"
+                "Download and install the update?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes)
+            if reply == QMessageBox.StandardButton.Yes:
+                self.btn_check_update.setEnabled(False)
+                self.lbl_update_status.setText(f"Downloading v{version}...")
+                self.lbl_update_status.setStyleSheet("color: #89b4fa;")
+                import threading
+                threading.Thread(target=self._do_download_update, args=(version,), daemon=True).start()
+            else:
+                self.lbl_update_status.setText(f"v{version} available — skipped")
+                self.lbl_update_status.setStyleSheet("color: #a6adc8;")
         else:
             self.lbl_update_status.setText("You are up to date")
             self.lbl_update_status.setStyleSheet("color: #a6adc8;")
@@ -2332,10 +2352,10 @@ class MainWindow(QMainWindow):
             self._append_log("Failed to launch update script")
 
     def _check_update_on_startup(self):
-        """Silently check for updates on startup."""
+        """Check for updates on startup and ask user before downloading."""
         if self.config.get("auto_check_updates", True):
             import threading
-            threading.Thread(target=self._do_update_check, daemon=True).start()
+            threading.Thread(target=self._do_update_check_only, daemon=True).start()
 
     def _report_bug(self):
         """Open bug report dialog."""
