@@ -2258,14 +2258,27 @@ class MainWindow(QMainWindow):
             self, "Select Folder with Layer Comp PNG Sequences")
         if not folder:
             return
+        # Ask for layer order
+        items = [
+            "Default (last alphabetically = background)",
+            "Reverse (first alphabetically = background)",
+        ]
+        choice, ok = QInputDialog.getItem(
+            self, "Layer Order",
+            "Select compositing order for layers:",
+            items, 0, False)
+        if not ok:
+            return
+        reverse = (choice == items[1])
         job = RenderJob()
         job.project_file = ""
         job.output_path = folder
         job.format = "MP4"
         job.compose_layers = True
-        job.compose_reverse_order = self.chk_compose_reverse.isChecked()
+        job.compose_reverse_order = reverse
         self.queue.add_job(job)
-        self._append_log(f"Added compose job: {Path(folder).name}")
+        order_label = "reverse" if reverse else "default"
+        self._append_log(f"Added compose job: {Path(folder).name} ({order_label} order)")
 
     def _open_in_explorer(self, filepath):
         """Open Windows Explorer at the given path."""

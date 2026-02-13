@@ -398,6 +398,9 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 
 ## Changelog
 
+### v1.5.5
+- **Fix Auto-Compose** - Moved `-frames:v` from input to output option in FFmpeg command, fixing frame sequence detection failures. Added reverse order dialog when composing. Full FFmpeg command now logged for debugging.
+
 ### v1.5.4
 - **Fix FFmpeg Compose** - Fixed frame sequence detection: uses `-start_number` for custom start frames (e.g., frame 254) and `-frames:v` to handle layers with different frame counts. Improved logging with pattern, start number, and frame count per layer.
 

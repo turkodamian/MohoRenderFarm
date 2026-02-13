@@ -83,7 +83,8 @@ def compose_layer_comps(output_dir: str, framerate: int = 24,
         on_output(f"[ffmpeg] Found {len(layer_folders)} layer comp folders to compose:")
         for name, folder, pngs in layer_folders:
             pattern, start_num, count = _detect_pattern(pngs)
-            on_output(f"[ffmpeg]   {name} ({count} frames, start={start_num}, pattern={pattern})")
+            first_file = pngs[0].name if pngs else "?"
+            on_output(f"[ffmpeg]   {name}: {count} frames, start={start_num}, pattern={pattern}, first={first_file}")
 
     # Default: last alphabetically = background, first = foreground
     # Reverse: first alphabetically = background, last = foreground
@@ -119,7 +120,6 @@ def compose_layer_comps(output_dir: str, framerate: int = 24,
         cmd.extend([
             "-framerate", str(framerate),
             "-start_number", str(start_num),
-            "-frames:v", str(min_frames),
             "-i", input_path,
         ])
 
@@ -145,6 +145,7 @@ def compose_layer_comps(output_dir: str, framerate: int = 24,
 
     cmd.extend([
         "-filter_complex", filter_complex,
+        "-frames:v", str(min_frames),
         "-c:v", "libx264",
         "-pix_fmt", "yuv420p",
         "-preset", "medium",
@@ -155,6 +156,9 @@ def compose_layer_comps(output_dir: str, framerate: int = 24,
     if on_output:
         on_output(f"[ffmpeg] Compositing {num_inputs} layers ({min_frames} frames @ {framerate}fps)...")
         on_output(f"[ffmpeg] Order (bottom to top): {' -> '.join(n for n, _, _, _, _ in valid_layers)}")
+        # Log full command for debugging
+        cmd_str = " ".join(f'"{c}"' if " " in c else c for c in cmd)
+        on_output(f"[ffmpeg] Command: {cmd_str}")
 
     try:
         result = subprocess.run(
