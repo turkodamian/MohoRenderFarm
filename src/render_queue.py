@@ -312,8 +312,9 @@ class RenderQueue:
 
         for job_data in data.get("jobs", []):
             job = RenderJob.from_dict(job_data)
-            # Reset status for loaded jobs
-            if job.status not in (RenderStatus.RENDERING.value,):
+            # Keep saved status (pending, completed, failed, skipped, cancelled)
+            # Only reset if it was mid-render (rendering status can't resume)
+            if job.status == RenderStatus.RENDERING.value:
                 job.status = RenderStatus.PENDING.value
                 job.progress = 0.0
                 job.error_message = ""
