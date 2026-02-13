@@ -398,6 +398,9 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 
 ## Changelog
 
+### v1.5.8
+- **Fix queue status persistence** - Job status (completed, failed, skipped, cancelled) now correctly preserved across app restarts
+
 ### v1.5.7
 - **Fix farm queue deadlock** - Returning farm jobs to local queue no longer freezes the app (changed to reentrant lock)
 - **Start/Stop Farm Queue** - New buttons to pause and resume job dispatch to slaves (active renders continue)
