@@ -398,6 +398,9 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 
 ## Changelog
 
+### v1.5.4
+- **Fix FFmpeg Compose** - Fixed frame sequence detection: uses `-start_number` for custom start frames (e.g., frame 254) and `-frames:v` to handle layers with different frame counts. Improved logging with pattern, start number, and frame count per layer.
+
 ### v1.5.3
 - **Auto-Compose** - New button to select a folder with layer comp PNG sequences and compose them into MP4 via FFmpeg, added as a queue task
 - **Skip Status** - Right-click context menu to skip/unskip jobs, preventing them from rendering while keeping them in the queue (shown in purple)
