@@ -72,16 +72,17 @@ def compose_layer_comps(output_dir: str, framerate: int = 24,
     # Determine the PNG filename pattern for each folder
     # Moho typically uses: name_00001.png format
     def _detect_pattern(pngs):
-        """Detect the ffmpeg-compatible glob/sequence pattern from PNG files."""
+        """Detect the ffmpeg-compatible sequence pattern and start number from PNG files."""
         first = pngs[0].name
         # Try to find frame number pattern: digits before .png
         match = re.search(r'(\d+)\.png$', first)
         if match:
             digits = match.group(1)
             num_digits = len(digits)
+            start_number = int(digits)
             prefix = first[:match.start(1)]
-            return f"{prefix}%0{num_digits}d.png"
-        return None
+            return f"{prefix}%0{num_digits}d.png", start_number
+        return None, 0
 
     # Default: last alphabetically = background, first = foreground
     # Reverse: first alphabetically = background, last = foreground
@@ -95,15 +96,15 @@ def compose_layer_comps(output_dir: str, framerate: int = 24,
 
     # Add input for each layer
     for name, folder, pngs in layers_bg_to_fg:
-        pattern = _detect_pattern(pngs)
+        pattern, start_num = _detect_pattern(pngs)
         if pattern is None:
             if on_output:
                 on_output(f"[ffmpeg] WARNING: Could not detect frame pattern in {name}, skipping")
             continue
         input_path = str(folder / pattern)
-        cmd.extend(["-framerate", str(framerate), "-i", input_path])
+        cmd.extend(["-framerate", str(framerate), "-start_number", str(start_num), "-i", input_path])
 
-    num_inputs = sum(1 for n, f, p in layers_bg_to_fg if _detect_pattern(p) is not None)
+    num_inputs = sum(1 for n, f, p in layers_bg_to_fg if _detect_pattern(p)[0] is not None)
     if num_inputs < 2:
         if on_output:
             on_output("[ffmpeg] ERROR: Not enough valid layer inputs")
