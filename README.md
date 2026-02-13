@@ -398,6 +398,12 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 
 ## Changelog
 
+### v1.5.6
+- **Fix button cropping** - Split Render Queue controls into two rows so button text is fully visible at any window size
+- **Compose order fix** - Default order is now alphabetical (A=background, Z=foreground); reverse checkbox inverts it
+- **Farm job management** - Retry failed/cancelled farm jobs, return completed/failed jobs to local queue, edit render settings of pending farm jobs
+- **Preserve queue status** - Saved/autosaved queue now preserves job status (completed, failed, skipped) instead of resetting all to pending
+
 ### v1.5.5
 - **Fix Auto-Compose** - Moved `-frames:v` from input to output option in FFmpeg command, fixing frame sequence detection failures. Added reverse order dialog when composing. Full FFmpeg command now logged for debugging.
 

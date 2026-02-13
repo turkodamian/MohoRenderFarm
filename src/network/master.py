@@ -393,6 +393,35 @@ class MasterServer:
                 "completed": list(self.completed_jobs),
             }
 
+    def retry_farm_job(self, job_id: str) -> Optional[RenderJob]:
+        """Move a completed/failed/cancelled job back to the pending queue."""
+        with self._lock:
+            for i, job in enumerate(self.completed_jobs):
+                if job.id == job_id:
+                    job = self.completed_jobs.pop(i)
+                    job.status = RenderStatus.PENDING.value
+                    job.progress = 0.0
+                    job.error_message = ""
+                    job.assigned_slave = ""
+                    job.start_time = None
+                    job.end_time = None
+                    self.pending_jobs.append(job)
+                    if self.on_output:
+                        self.on_output(f"Job retried: {job.project_name} [{job_id}]")
+                    self._notify_queue_changed()
+                    return job
+        return None
+
+    def remove_completed_job(self, job_id: str) -> Optional[RenderJob]:
+        """Remove a completed/failed/cancelled job from history."""
+        with self._lock:
+            for i, job in enumerate(self.completed_jobs):
+                if job.id == job_id:
+                    job = self.completed_jobs.pop(i)
+                    self._notify_queue_changed()
+                    return job
+        return None
+
     def clear_completed_farm_jobs(self):
         """Clear the completed/failed/cancelled job history."""
         with self._lock:

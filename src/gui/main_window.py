@@ -929,57 +929,62 @@ class MainWindow(QMainWindow):
         top_layout = QVBoxLayout(top_widget)
         top_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Controls bar
-        controls = QHBoxLayout()
+        # Controls row 1: Add / Render / Clear
+        row1 = QHBoxLayout()
 
         self.btn_add_files = QPushButton("Add Projects")
         self.btn_add_files.setObjectName("primaryBtn")
         self.btn_add_folder = QPushButton("Add Folder")
-        controls.addWidget(self.btn_add_files)
-        controls.addWidget(self.btn_add_folder)
+        row1.addWidget(self.btn_add_files)
+        row1.addWidget(self.btn_add_folder)
 
-        controls.addSpacing(20)
+        row1.addSpacing(20)
 
         self.btn_start_queue = QPushButton("Start Queue")
         self.btn_start_queue.setObjectName("successBtn")
         self.btn_pause_queue = QPushButton("Pause")
         self.btn_stop_queue = QPushButton("Stop")
         self.btn_stop_queue.setObjectName("dangerBtn")
-        controls.addWidget(self.btn_start_queue)
-        controls.addWidget(self.btn_pause_queue)
-        controls.addWidget(self.btn_stop_queue)
+        row1.addWidget(self.btn_start_queue)
+        row1.addWidget(self.btn_pause_queue)
+        row1.addWidget(self.btn_stop_queue)
 
-        controls.addSpacing(20)
+        row1.addSpacing(20)
 
         self.btn_clear_completed = QPushButton("Clear Completed")
         self.btn_clear_all = QPushButton("Clear All")
-        controls.addWidget(self.btn_clear_completed)
-        controls.addWidget(self.btn_clear_all)
+        row1.addWidget(self.btn_clear_completed)
+        row1.addWidget(self.btn_clear_all)
 
-        controls.addSpacing(20)
+        row1.addStretch()
+
+        top_layout.addLayout(row1)
+
+        # Controls row 2: Farm / Compose / Save-Load
+        row2 = QHBoxLayout()
 
         self.btn_send_to_farm = QPushButton("Send to Farm")
         self.btn_send_to_farm.setToolTip("Send selected pending jobs to the render farm")
         self.btn_send_all_to_farm = QPushButton("Send All to Farm")
         self.btn_send_all_to_farm.setToolTip("Send all pending jobs to the render farm")
-        controls.addWidget(self.btn_send_to_farm)
-        controls.addWidget(self.btn_send_all_to_farm)
+        row2.addWidget(self.btn_send_to_farm)
+        row2.addWidget(self.btn_send_all_to_farm)
 
-        controls.addSpacing(20)
+        row2.addSpacing(20)
 
         self.btn_auto_compose = QPushButton("Auto-Compose")
         self.btn_auto_compose.setToolTip("Select a folder with layer comp PNG sequences to compose into MP4")
         self.btn_auto_compose.clicked.connect(self._auto_compose)
-        controls.addWidget(self.btn_auto_compose)
+        row2.addWidget(self.btn_auto_compose)
 
-        controls.addStretch()
+        row2.addStretch()
 
         self.btn_save_queue = QPushButton("Save Queue")
         self.btn_load_queue = QPushButton("Load Queue")
-        controls.addWidget(self.btn_save_queue)
-        controls.addWidget(self.btn_load_queue)
+        row2.addWidget(self.btn_save_queue)
+        row2.addWidget(self.btn_load_queue)
 
-        top_layout.addLayout(controls)
+        top_layout.addLayout(row2)
 
         # Queue table
         self.queue_table = QTableWidget()
@@ -3194,6 +3199,9 @@ class MainWindow(QMainWindow):
         if status in ("PENDING", "RESERVED"):
             act_assign = menu.addAction("Assign to Slave...")
             act_assign.triggered.connect(lambda: self._assign_farm_job_to_slave_dialog(job_id))
+            act_edit = menu.addAction("Edit Render Settings...")
+            act_edit.triggered.connect(lambda: self._edit_farm_job_settings(job_id))
+            menu.addSeparator()
             act_cancel = menu.addAction("Cancel Job")
             act_cancel.triggered.connect(lambda: self._cancel_farm_job(job_id))
             act_return = menu.addAction("Return to Local Queue")
@@ -3202,6 +3210,12 @@ class MainWindow(QMainWindow):
             act_stop = menu.addAction("Stop Rendering")
             act_stop.triggered.connect(lambda: self._stop_farm_job(job_id))
         if status in ("COMPLETED", "FAILED", "CANCELLED"):
+            if status in ("FAILED", "CANCELLED"):
+                act_retry = menu.addAction("Retry in Farm")
+                act_retry.triggered.connect(lambda: self._retry_farm_job(job_id))
+            act_return = menu.addAction("Return to Local Queue")
+            act_return.triggered.connect(lambda: self._return_farm_job_to_local(job_id))
+            menu.addSeparator()
             act_clear = menu.addAction("Clear Completed Jobs")
             act_clear.triggered.connect(self._clear_completed_farm_jobs)
         if not menu.isEmpty():
@@ -3292,12 +3306,45 @@ class MainWindow(QMainWindow):
         """Remove a job from the farm and add it back to the local queue."""
         if not self.master_server:
             return
+        # Try pending/reserved first, then completed/failed/cancelled
         job = self.master_server.remove_job_from_farm(job_id)
+        if not job:
+            job = self.master_server.remove_completed_job(job_id)
         if job:
             job.status = RenderStatus.PENDING.value
+            job.progress = 0.0
+            job.error_message = ""
             job.assigned_slave = ""
+            job.start_time = None
+            job.end_time = None
             self.queue.add_job(job)
             self._append_farm_log(f"[GUI] Returned to local queue: {job.project_name} [{job_id}]")
+            self._refresh_farm_queue_table()
+
+    def _retry_farm_job(self, job_id):
+        """Retry a failed/cancelled farm job."""
+        if not self.master_server:
+            return
+        job = self.master_server.retry_farm_job(job_id)
+        if job:
+            self._append_farm_log(f"[GUI] Retrying farm job: {job.project_name} [{job_id}]")
+            self._refresh_farm_queue_table()
+
+    def _edit_farm_job_settings(self, job_id):
+        """Edit render settings of a pending farm job."""
+        if not self.master_server:
+            return
+        # Find the job in pending queue
+        job = None
+        for j in self.master_server.pending_jobs:
+            if j.id == job_id:
+                job = j
+                break
+        if not job:
+            return
+        dialog = EditSettingsDialog([job], parent=self)
+        if dialog.exec():
+            self._append_farm_log(f"[GUI] Updated settings for farm job: {job.project_name} [{job_id}]")
             self._refresh_farm_queue_table()
 
     def _clear_completed_farm_jobs(self):
