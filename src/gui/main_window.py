@@ -2278,13 +2278,35 @@ class MainWindow(QMainWindow):
     def _auto_compose(self):
         """Add an FFmpeg compose-only job to the queue."""
         folder = QFileDialog.getExistingDirectory(
-            self, "Select Folder with Layer Comp PNG Sequences")
+            self, "Select Folder with Layer Comp Image Sequences")
         if not folder:
+            return
+        # Validate: must be a directory with at least 2 subfolders containing images
+        folder_path = Path(folder)
+        if not folder_path.is_dir():
+            QMessageBox.warning(self, "Invalid Path",
+                                f"Not a directory:\n{folder}")
+            return
+        from src.ffmpeg_compose import _find_image_sequences
+        layer_count = sum(1 for item in folder_path.iterdir()
+                          if item.is_dir() and _find_image_sequences(item))
+        if layer_count < 2:
+            msg = f"Found {layer_count} layer folder(s) with images in:\n{folder}\n\n"
+            if layer_count == 0:
+                direct = _find_image_sequences(folder_path)
+                if direct:
+                    msg += (f"Found {len(direct)} images directly in the folder.\n"
+                            f"Select the PARENT folder that contains layer subfolders.")
+                else:
+                    msg += "No image sequences found. Expected subfolders with image sequences (PNG, JPEG, TGA, BMP)."
+            else:
+                msg += "Need at least 2 layer subfolders to compose."
+            QMessageBox.warning(self, "Cannot Compose", msg)
             return
         # Ask for layer order
         items = [
-            "Default (last alphabetically = background)",
-            "Reverse (first alphabetically = background)",
+            "Alphabetical (A = background, Z = foreground)",
+            "Reverse (Z = background, A = foreground)",
         ]
         choice, ok = QInputDialog.getItem(
             self, "Layer Order",
@@ -2301,7 +2323,7 @@ class MainWindow(QMainWindow):
         job.compose_reverse_order = reverse
         self.queue.add_job(job)
         order_label = "reverse" if reverse else "default"
-        self._append_log(f"Added compose job: {Path(folder).name} ({order_label} order)")
+        self._append_log(f"Added compose job: {Path(folder).name} ({layer_count} layers, {order_label} order)")
 
     def _open_in_explorer(self, filepath):
         """Open Windows Explorer at the given path."""

@@ -5,34 +5,46 @@ import subprocess
 from pathlib import Path
 from typing import Optional, Callable
 
+# Image extensions supported for layer comp compositing
+IMAGE_EXTENSIONS = ("*.png", "*.jpg", "*.jpeg", "*.tga", "*.bmp")
+
 
 def get_ffmpeg_path():
     """Get the path to the bundled ffmpeg executable."""
     return os.path.join(os.path.dirname(os.path.dirname(__file__)), "ffmpeg", "ffmpeg.exe")
 
 
+def _find_image_sequences(folder: Path):
+    """Find image sequence files in a folder, trying all supported formats."""
+    for ext_glob in IMAGE_EXTENSIONS:
+        files = sorted(folder.glob(ext_glob))
+        if files:
+            return files
+    return []
+
+
 def compose_layer_comps(output_dir: str, framerate: int = 24,
                         ffmpeg_path: str = None,
                         on_output: Optional[Callable[[str], None]] = None,
                         reverse_order: bool = False) -> Optional[str]:
-    """Compose all layer comp PNG sequences into a single MP4.
+    """Compose all layer comp image sequences into a single MP4.
 
     Default order (alphabetical):
-    - LAST alphabetically = background (bottom layer)
-    - FIRST alphabetically = foreground (top layer)
-
-    Reverse order:
     - FIRST alphabetically = background (bottom layer)
     - LAST alphabetically = foreground (top layer)
 
-    Uses ffmpeg overlay filter to composite all layers.
+    Reverse order (inverse alphabetical):
+    - LAST alphabetically = background (bottom layer)
+    - FIRST alphabetically = foreground (top layer)
+
+    Supports PNG, JPEG, TGA, and BMP image sequences.
 
     Args:
-        output_dir: Directory containing layer comp subfolders with PNG sequences
+        output_dir: Directory containing layer comp subfolders with image sequences
         framerate: Frame rate for the output video
         ffmpeg_path: Path to ffmpeg executable (uses bundled if None)
         on_output: Callback for log messages
-        reverse_order: If True, reverse the compositing order (first alpha = background)
+        reverse_order: If True, use inverse alphabetical order (last alpha = background)
 
     Returns:
         Path to the composed MP4 file, or None if failed
@@ -48,58 +60,69 @@ def compose_layer_comps(output_dir: str, framerate: int = 24,
     output_path = Path(output_dir)
     if not output_path.is_dir():
         if on_output:
-            on_output(f"[ffmpeg] ERROR: Output directory not found: {output_dir}")
+            on_output(f"[ffmpeg] ERROR: Not a directory: {output_dir}")
+            if output_path.is_file():
+                on_output(f"[ffmpeg] HINT: This is a file, not a folder. Select the folder containing layer subfolders.")
         return None
 
-    # Find layer comp subfolders containing PNG sequences
+    # Find layer comp subfolders containing image sequences
     layer_folders = []
     for item in sorted(output_path.iterdir()):
         if item.is_dir():
-            pngs = sorted(item.glob("*.png"))
-            if pngs:
-                layer_folders.append((item.name, item, pngs))
+            images = _find_image_sequences(item)
+            if images:
+                layer_folders.append((item.name, item, images))
 
     if len(layer_folders) < 2:
         if on_output:
             on_output(f"[ffmpeg] Need at least 2 layer comp folders to compose, found {len(layer_folders)}")
+            if len(layer_folders) == 0:
+                # Check if images are directly in the folder (not in subfolders)
+                direct_images = _find_image_sequences(output_path)
+                if direct_images:
+                    on_output(f"[ffmpeg] HINT: Found {len(direct_images)} images directly in the folder. "
+                              f"Select the PARENT folder that contains layer subfolders.")
+                else:
+                    on_output(f"[ffmpeg] HINT: No image sequences found. Expected subfolders with image sequences.")
         return None
 
-    # Determine the PNG filename pattern for each folder
-    # Moho uses: name_00001.png or name00001.png (frame numbers can start at any value)
-    def _detect_pattern(pngs):
+    # Detect the ffmpeg-compatible sequence pattern for a list of image files
+    def _detect_pattern(images):
         """Detect the ffmpeg-compatible sequence pattern, start number, and frame count."""
-        first = pngs[0].name
-        # Find the last sequence of digits before .png (the frame number)
-        match = re.search(r'(\d+)\.png$', first)
+        first = images[0].name
+        ext = images[0].suffix  # .png, .jpg, .tga, .bmp, etc.
+        # Find the last sequence of digits before the extension (the frame number)
+        escaped_ext = re.escape(ext)
+        match = re.search(rf'(\d+){escaped_ext}$', first)
         if match:
             digits = match.group(1)
             num_digits = len(digits)
             start_number = int(digits)
             prefix = first[:match.start(1)]
-            return f"{prefix}%0{num_digits}d.png", start_number, len(pngs)
+            return f"{prefix}%0{num_digits}d{ext}", start_number, len(images)
         return None, 0, 0
 
     if on_output:
         on_output(f"[ffmpeg] Found {len(layer_folders)} layer comp folders to compose:")
-        for name, folder, pngs in layer_folders:
-            pattern, start_num, count = _detect_pattern(pngs)
-            first_file = pngs[0].name if pngs else "?"
+        for name, folder, images in layer_folders:
+            pattern, start_num, count = _detect_pattern(images)
+            first_file = images[0].name if images else "?"
             on_output(f"[ffmpeg]   {name}: {count} frames, start={start_num}, pattern={pattern}, first={first_file}")
 
-    # Default: last alphabetically = background, first = foreground
-    # Reverse: first alphabetically = background, last = foreground
+    # Default (alphabetical): A (bg) first, Z (fg) last
+    # Reverse (inverse alphabetical): Z (bg) first, A (fg) last
     if reverse_order:
-        layers_bg_to_fg = list(layer_folders)  # A (bg) first, Z (fg) last
-    else:
         layers_bg_to_fg = list(reversed(layer_folders))  # Z (bg) first, A (fg) last
+    else:
+        layers_bg_to_fg = list(layer_folders)  # A (bg) first, Z (fg) last
 
     # Build ffmpeg command
     cmd = [ffmpeg_path, "-y"]  # -y to overwrite
 
     # Determine the shortest frame count across all valid layers
     valid_layers = []
-    for name, folder, pngs in layers_bg_to_fg:
-        pattern, start_num, count = _detect_pattern(pngs)
+    for name, folder, images in layers_bg_to_fg:
+        pattern, start_num, count = _detect_pattern(images)
         if pattern is None:
             if on_output:
                 on_output(f"[ffmpeg] WARNING: Could not detect frame pattern in {name}, skipping")

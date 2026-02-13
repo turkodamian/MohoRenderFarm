@@ -398,6 +398,10 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 
 ## Changelog
 
+### v1.5.9
+- **Auto-Compose multi-format** - Now supports PNG, JPEG, TGA, and BMP image sequences (not just PNG)
+- **Auto-Compose validation** - Shows clear error if the selected path is a file instead of a folder, or if there aren't enough layer subfolders with images
+
 ### v1.5.8
 - **Fix queue status persistence** - Job status (completed, failed, skipped, cancelled) now correctly preserved across app restarts
 
