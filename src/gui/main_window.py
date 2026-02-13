@@ -3440,12 +3440,17 @@ class MainWindow(QMainWindow):
         """Edit render settings of a pending farm job."""
         if not self.master_server:
             return
-        # Find the job in pending queue
+        # Find the job in pending or reserved queues
         job = None
         for j in self.master_server.pending_jobs:
             if j.id == job_id:
                 job = j
                 break
+        if not job:
+            for j in self.master_server.reserved_jobs.values():
+                if j.id == job_id:
+                    job = j
+                    break
         if not job:
             return
         dialog = EditSettingsDialog([job], parent=self)
