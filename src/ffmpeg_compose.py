@@ -64,25 +64,26 @@ def compose_layer_comps(output_dir: str, framerate: int = 24,
             on_output(f"[ffmpeg] Need at least 2 layer comp folders to compose, found {len(layer_folders)}")
         return None
 
-    if on_output:
-        on_output(f"[ffmpeg] Found {len(layer_folders)} layer comp folders to compose:")
-        for name, folder, pngs in layer_folders:
-            on_output(f"[ffmpeg]   {name} ({len(pngs)} frames)")
-
     # Determine the PNG filename pattern for each folder
-    # Moho typically uses: name_00001.png format
+    # Moho uses: name_00001.png or name00001.png (frame numbers can start at any value)
     def _detect_pattern(pngs):
-        """Detect the ffmpeg-compatible sequence pattern and start number from PNG files."""
+        """Detect the ffmpeg-compatible sequence pattern, start number, and frame count."""
         first = pngs[0].name
-        # Try to find frame number pattern: digits before .png
+        # Find the last sequence of digits before .png (the frame number)
         match = re.search(r'(\d+)\.png$', first)
         if match:
             digits = match.group(1)
             num_digits = len(digits)
             start_number = int(digits)
             prefix = first[:match.start(1)]
-            return f"{prefix}%0{num_digits}d.png", start_number
-        return None, 0
+            return f"{prefix}%0{num_digits}d.png", start_number, len(pngs)
+        return None, 0, 0
+
+    if on_output:
+        on_output(f"[ffmpeg] Found {len(layer_folders)} layer comp folders to compose:")
+        for name, folder, pngs in layer_folders:
+            pattern, start_num, count = _detect_pattern(pngs)
+            on_output(f"[ffmpeg]   {name} ({count} frames, start={start_num}, pattern={pattern})")
 
     # Default: last alphabetically = background, first = foreground
     # Reverse: first alphabetically = background, last = foreground
@@ -94,24 +95,38 @@ def compose_layer_comps(output_dir: str, framerate: int = 24,
     # Build ffmpeg command
     cmd = [ffmpeg_path, "-y"]  # -y to overwrite
 
-    # Add input for each layer
+    # Determine the shortest frame count across all valid layers
+    valid_layers = []
     for name, folder, pngs in layers_bg_to_fg:
-        pattern, start_num = _detect_pattern(pngs)
+        pattern, start_num, count = _detect_pattern(pngs)
         if pattern is None:
             if on_output:
                 on_output(f"[ffmpeg] WARNING: Could not detect frame pattern in {name}, skipping")
             continue
-        input_path = str(folder / pattern)
-        cmd.extend(["-framerate", str(framerate), "-start_number", str(start_num), "-i", input_path])
+        valid_layers.append((name, folder, pattern, start_num, count))
 
-    num_inputs = sum(1 for n, f, p in layers_bg_to_fg if _detect_pattern(p)[0] is not None)
-    if num_inputs < 2:
+    if len(valid_layers) < 2:
         if on_output:
             on_output("[ffmpeg] ERROR: Not enough valid layer inputs")
         return None
 
+    # Use shortest frame count so all inputs match
+    min_frames = min(count for _, _, _, _, count in valid_layers)
+
+    # Add input for each layer
+    for name, folder, pattern, start_num, count in valid_layers:
+        input_path = str(folder / pattern)
+        cmd.extend([
+            "-framerate", str(framerate),
+            "-start_number", str(start_num),
+            "-frames:v", str(min_frames),
+            "-i", input_path,
+        ])
+
+    num_inputs = len(valid_layers)
+
     # Build overlay filter chain
-    # [0] = background (last alphabetically), [1] = next layer, ... [N-1] = foreground (first alphabetically)
+    # [0] = background, [1] = next layer, ... [N-1] = foreground
     if num_inputs == 2:
         filter_complex = "[0:v][1:v]overlay=0:0:format=auto"
     else:
@@ -138,8 +153,8 @@ def compose_layer_comps(output_dir: str, framerate: int = 24,
     ])
 
     if on_output:
-        on_output(f"[ffmpeg] Compositing {num_inputs} layers...")
-        on_output(f"[ffmpeg] Order (bottom to top): {' -> '.join(n for n, f, p in layers_bg_to_fg)}")
+        on_output(f"[ffmpeg] Compositing {num_inputs} layers ({min_frames} frames @ {framerate}fps)...")
+        on_output(f"[ffmpeg] Order (bottom to top): {' -> '.join(n for n, _, _, _, _ in valid_layers)}")
 
     try:
         result = subprocess.run(
