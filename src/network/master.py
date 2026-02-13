@@ -57,7 +57,8 @@ class MasterServer:
         self.completed_jobs: List[RenderJob] = []  # history of completed/failed jobs
         self._cancel_requests: set = set()  # job IDs that slaves should cancel
         self._force_update = False  # When True, heartbeat tells all slaves to update
-        self._lock = threading.Lock()
+        self._paused = False  # When True, no new jobs are dispatched to slaves
+        self._lock = threading.RLock()
         self._running = False
         self._thread = None
         self._distributor_thread = None
@@ -146,6 +147,10 @@ class MasterServer:
                     return jsonify({"job": None, "error": "not registered"}), 403
 
                 self.slaves[key].last_heartbeat = time.time()
+
+                # Don't dispatch jobs when paused
+                if self._paused:
+                    return jsonify({"job": None})
 
                 # Check for a manually reserved job first
                 job = self.reserved_jobs.pop(key, None)
@@ -430,6 +435,22 @@ class MasterServer:
         if self.on_output:
             self.on_output(f"Cleared {count} completed farm jobs")
         self._notify_queue_changed()
+
+    @property
+    def is_paused(self):
+        return self._paused
+
+    def pause_farm_queue(self):
+        """Pause job dispatch — no new jobs will be sent to slaves."""
+        self._paused = True
+        if self.on_output:
+            self.on_output("Farm queue paused")
+
+    def resume_farm_queue(self):
+        """Resume job dispatch."""
+        self._paused = False
+        if self.on_output:
+            self.on_output("Farm queue resumed")
 
     def force_update_slaves(self):
         """Set the force_update flag so all slaves update on next heartbeat."""

@@ -398,6 +398,11 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 
 ## Changelog
 
+### v1.5.7
+- **Fix farm queue deadlock** - Returning farm jobs to local queue no longer freezes the app (changed to reentrant lock)
+- **Start/Stop Farm Queue** - New buttons to pause and resume job dispatch to slaves (active renders continue)
+- **Reassign Slave** - Right-click a rendering farm job to stop it and reassign to a different slave
+
 ### v1.5.6
 - **Fix button cropping** - Split Render Queue controls into two rows so button text is fully visible at any window size
 - **Compose order fix** - Default order is now alphabetical (A=background, Z=foreground); reverse checkbox inverts it

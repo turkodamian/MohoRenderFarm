@@ -1388,6 +1388,24 @@ class MainWindow(QMainWindow):
         self.btn_add_folder_to_farm.setToolTip("Add all .moho files from a folder to the farm queue")
         self.btn_add_folder_to_farm.clicked.connect(self._add_folder_to_farm)
         farm_controls.addWidget(self.btn_add_folder_to_farm)
+
+        farm_controls.addSpacing(20)
+
+        self.btn_start_farm_queue = QPushButton("Start Farm Queue")
+        self.btn_start_farm_queue.setObjectName("successBtn")
+        self.btn_start_farm_queue.setToolTip("Resume dispatching jobs to slaves")
+        self.btn_start_farm_queue.setEnabled(False)
+        self.btn_start_farm_queue.clicked.connect(self._start_farm_queue)
+        farm_controls.addWidget(self.btn_start_farm_queue)
+        self.btn_stop_farm_queue = QPushButton("Stop Farm Queue")
+        self.btn_stop_farm_queue.setObjectName("dangerBtn")
+        self.btn_stop_farm_queue.setToolTip("Stop dispatching new jobs to slaves (active jobs continue)")
+        self.btn_stop_farm_queue.setEnabled(False)
+        self.btn_stop_farm_queue.clicked.connect(self._stop_farm_queue)
+        farm_controls.addWidget(self.btn_stop_farm_queue)
+
+        farm_controls.addSpacing(20)
+
         self.btn_clear_completed_farm = QPushButton("Clear Completed")
         self.btn_clear_completed_farm.setToolTip("Clear completed jobs from the farm queue")
         self.btn_clear_completed_farm.clicked.connect(self._clear_completed_farm_jobs)
@@ -2546,6 +2564,8 @@ class MainWindow(QMainWindow):
         self.btn_stop_master.setEnabled(True)
         self.btn_start_slave.setEnabled(False)
         self.btn_force_update_slaves.setEnabled(True)
+        self.btn_stop_farm_queue.setEnabled(True)
+        self.btn_start_farm_queue.setEnabled(False)
         ip = self.master_server.get_local_ip()
         self.lbl_farm_status.setText(f"Master running on {ip}:{port}")
         self.lbl_farm_status.setStyleSheet("color: #a6e3a1; font-weight: bold;")
@@ -2576,11 +2596,29 @@ class MainWindow(QMainWindow):
         self.btn_stop_master.setEnabled(False)
         self.btn_start_slave.setEnabled(True)
         self.btn_force_update_slaves.setEnabled(False)
+        self.btn_start_farm_queue.setEnabled(False)
+        self.btn_stop_farm_queue.setEnabled(False)
         self.lbl_farm_status.setText("Status: Stopped")
         self.lbl_farm_status.setStyleSheet("color: #f9e2af; font-weight: bold;")
         self.lbl_farm_stats.setText("Farm: not running")
         self.lbl_farm_total_time.setText("")
         self.farm_queue_table.setRowCount(0)
+
+    def _start_farm_queue(self):
+        """Resume dispatching farm jobs to slaves."""
+        if self.master_server:
+            self.master_server.resume_farm_queue()
+            self.btn_start_farm_queue.setEnabled(False)
+            self.btn_stop_farm_queue.setEnabled(True)
+            self._append_farm_log("[MASTER] Farm queue started")
+
+    def _stop_farm_queue(self):
+        """Pause dispatching farm jobs (active renders continue)."""
+        if self.master_server:
+            self.master_server.pause_farm_queue()
+            self.btn_start_farm_queue.setEnabled(True)
+            self.btn_stop_farm_queue.setEnabled(False)
+            self._append_farm_log("[MASTER] Farm queue stopped (active jobs continue)")
 
     def _find_master(self):
         """Start scanning local network for a running master server."""
@@ -3207,6 +3245,8 @@ class MainWindow(QMainWindow):
             act_return = menu.addAction("Return to Local Queue")
             act_return.triggered.connect(lambda: self._return_farm_job_to_local(job_id))
         if status == "RENDERING":
+            act_reassign = menu.addAction("Reassign to Slave...")
+            act_reassign.triggered.connect(lambda: self._reassign_farm_job(job_id))
             act_stop = menu.addAction("Stop Rendering")
             act_stop.triggered.connect(lambda: self._stop_farm_job(job_id))
         if status in ("COMPLETED", "FAILED", "CANCELLED"):
@@ -3329,6 +3369,50 @@ class MainWindow(QMainWindow):
         if job:
             self._append_farm_log(f"[GUI] Retrying farm job: {job.project_name} [{job_id}]")
             self._refresh_farm_queue_table()
+
+    def _reassign_farm_job(self, job_id):
+        """Stop a rendering job and reassign it to a different slave."""
+        if not self.master_server:
+            return
+        idle_slaves = [
+            (addr, slave) for addr, slave in self.master_server.slaves.items()
+            if slave.is_alive and slave.status == "idle"
+        ]
+        if not idle_slaves:
+            QMessageBox.information(self, "No Idle Slaves",
+                                    "No idle slaves available. The job will be stopped and re-queued as pending.")
+            # Just stop and re-queue
+            self.master_server.request_job_cancellation(job_id)
+            # Move from active to pending after cancellation completes
+            self._append_farm_log(f"[GUI] Stopping job [{job_id}] for reassignment (no idle slaves)")
+            return
+        items = [f"{slave.hostname} ({addr})" for addr, slave in idle_slaves]
+        item, ok = QInputDialog.getItem(
+            self, "Reassign to Slave",
+            "Stop current render and reassign to:",
+            items, 0, False)
+        if not ok:
+            return
+        idx = items.index(item)
+        target_addr = idle_slaves[idx][0]
+        # Stop current render, move to pending, then assign to new slave
+        with self.master_server._lock:
+            # Find and remove from active jobs
+            for addr, job in list(self.master_server.active_jobs.items()):
+                if job.id == job_id:
+                    self.master_server.active_jobs.pop(addr)
+                    self.master_server._cancel_requests.add(job_id)
+                    job.status = RenderStatus.PENDING.value
+                    job.progress = 0.0
+                    job.assigned_slave = ""
+                    job.start_time = None
+                    job.end_time = None
+                    # Reserve for the target slave
+                    self.master_server.reserved_jobs[target_addr] = job
+                    self._append_farm_log(
+                        f"[GUI] Reassigned {job.project_name} [{job_id}] to {idle_slaves[idx][1].hostname}")
+                    break
+        self._refresh_farm_queue_table()
 
     def _edit_farm_job_settings(self, job_id):
         """Edit render settings of a pending farm job."""
