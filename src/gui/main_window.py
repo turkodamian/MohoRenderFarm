@@ -940,11 +940,14 @@ class MainWindow(QMainWindow):
 
         row1.addSpacing(20)
 
+        self.btn_start_job = QPushButton("Start Job")
+        self.btn_start_job.setToolTip("Start only the selected job(s)")
         self.btn_start_queue = QPushButton("Start Queue")
         self.btn_start_queue.setObjectName("successBtn")
         self.btn_pause_queue = QPushButton("Pause")
         self.btn_stop_queue = QPushButton("Stop")
         self.btn_stop_queue.setObjectName("dangerBtn")
+        row1.addWidget(self.btn_start_job)
         row1.addWidget(self.btn_start_queue)
         row1.addWidget(self.btn_pause_queue)
         row1.addWidget(self.btn_stop_queue)
@@ -1622,6 +1625,7 @@ class MainWindow(QMainWindow):
         # Queue controls
         self.btn_add_files.clicked.connect(self._add_files)
         self.btn_add_folder.clicked.connect(self._add_folder)
+        self.btn_start_job.clicked.connect(self._start_selected_jobs)
         self.btn_start_queue.clicked.connect(self._start_queue)
         self.btn_pause_queue.clicked.connect(self._pause_queue)
         self.btn_stop_queue.clicked.connect(self._stop_queue)
@@ -1992,6 +1996,39 @@ class MainWindow(QMainWindow):
             self._log_file_handle = None
 
     # --- Queue actions ---
+    def _start_selected_jobs(self):
+        """Start only the selected job(s) from the queue table."""
+        selected_rows = sorted(set(idx.row() for idx in self.queue_table.selectedIndexes()))
+        pending_ids = []
+        for row in selected_rows:
+            if row < len(self.queue.jobs):
+                job = self.queue.jobs[row]
+                if job.status == RenderStatus.PENDING.value:
+                    pending_ids.append(job.id)
+        if not pending_ids:
+            self._append_log("No pending jobs selected to start.")
+            return
+        self.queue.moho_path = self.edit_moho_path.text()
+        self._open_log_file()
+        self.queue.start_jobs(pending_ids)
+        self._start_render_timer()
+        names = ", ".join(self.queue.get_job(jid).project_name for jid in pending_ids if self.queue.get_job(jid))
+        self._append_log(f"Started {len(pending_ids)} job{'s' if len(pending_ids) > 1 else ''}: {names}")
+        self.status_bar.showMessage("Rendering...")
+
+    def _start_specific_jobs(self, jobs):
+        """Start specific jobs (from context menu)."""
+        pending = [j for j in jobs if j.status == RenderStatus.PENDING.value]
+        if not pending:
+            return
+        self.queue.moho_path = self.edit_moho_path.text()
+        self._open_log_file()
+        self.queue.start_jobs([j.id for j in pending])
+        self._start_render_timer()
+        names = ", ".join(j.project_name for j in pending)
+        self._append_log(f"Started {len(pending)} job{'s' if len(pending) > 1 else ''}: {names}")
+        self.status_bar.showMessage("Rendering...")
+
     def _start_queue(self):
         if not self.queue.jobs:
             self._append_log("Queue is empty. Add projects first.")
@@ -2137,17 +2174,32 @@ class MainWindow(QMainWindow):
 
         menu = QMenu(self)
 
-        # Edit Render Settings (for non-rendering jobs)
+        # Edit Render Settings / Compose Settings (for non-rendering jobs)
         editable_jobs = [j for j in selected_jobs if j.status != RenderStatus.RENDERING.value]
         if editable_jobs:
-            act_edit = menu.addAction(f"Edit Render Settings ({len(editable_jobs)} job{'s' if len(editable_jobs) > 1 else ''})")
-            act_edit.triggered.connect(lambda: self._edit_job_settings(editable_jobs))
+            compose_jobs = [j for j in editable_jobs if not j.project_file and j.compose_layers]
+            render_jobs = [j for j in editable_jobs if j not in compose_jobs]
+            if compose_jobs:
+                n = len(compose_jobs)
+                act_compose_edit = menu.addAction(f"Edit Compose Settings ({n} job{'s' if n > 1 else ''})")
+                act_compose_edit.triggered.connect(lambda: self._edit_compose_settings(compose_jobs))
+            if render_jobs:
+                n = len(render_jobs)
+                act_edit = menu.addAction(f"Edit Render Settings ({n} job{'s' if n > 1 else ''})")
+                act_edit.triggered.connect(lambda: self._edit_job_settings(render_jobs))
 
         # Show in Explorer
         act_show = menu.addAction("Show in Explorer")
         act_show.triggered.connect(lambda: self._show_in_explorer(job))
 
         menu.addSeparator()
+
+        # Start Job (for pending jobs)
+        startable = [j for j in selected_jobs if j.status == RenderStatus.PENDING.value]
+        if startable:
+            n = len(startable)
+            act_start = menu.addAction(f"Start Job ({n} job{'s' if n > 1 else ''})")
+            act_start.triggered.connect(lambda: self._start_specific_jobs(startable))
 
         if job.status in (RenderStatus.FAILED.value, RenderStatus.CANCELLED.value, RenderStatus.COMPLETED.value):
             act_retry = menu.addAction("Retry")
@@ -2181,7 +2233,7 @@ class MainWindow(QMainWindow):
 
         # Send to Farm option for pending jobs
         pending_selected = [j for j in selected_jobs if j.status == RenderStatus.PENDING.value]
-        if pending_selected and self.master_server:
+        if pending_selected and (self.master_server or self.slave_client):
             menu.addSeparator()
             n = len(pending_selected)
             act_farm = menu.addAction(f"Send to Farm ({n} job{'s' if n > 1 else ''})")
@@ -2342,6 +2394,28 @@ class MainWindow(QMainWindow):
     def _show_in_explorer(self, job):
         """Open Windows Explorer with the project file selected."""
         self._open_in_explorer(job.project_file)
+
+    def _edit_compose_settings(self, jobs):
+        """Open a simple dialog to edit compose layer order for compose-only jobs."""
+        current_reverse = jobs[0].compose_reverse_order if jobs else False
+        items = [
+            "Alphabetical (A = background, Z = foreground)",
+            "Reverse (Z = background, A = foreground)",
+        ]
+        current_idx = 1 if current_reverse else 0
+        choice, ok = QInputDialog.getItem(
+            self, "Compose Settings",
+            f"Select compositing order for {len(jobs)} job{'s' if len(jobs) > 1 else ''}:",
+            items, current_idx, False)
+        if not ok:
+            return
+        reverse = (choice == items[1])
+        for job in jobs:
+            job.compose_reverse_order = reverse
+        if self.queue.on_queue_changed:
+            self.queue.on_queue_changed()
+        order_label = "reverse" if reverse else "alphabetical"
+        self._append_log(f"Updated compose order to {order_label} for {len(jobs)} job{'s' if len(jobs) > 1 else ''}")
 
     def _edit_job_settings(self, jobs):
         """Open the Edit Render Settings dialog for the given jobs."""
@@ -3055,6 +3129,37 @@ class MainWindow(QMainWindow):
             self.lbl_farm_total_time.setText("")
 
     # --- Farm: Send to Farm ---
+    def _show_send_to_farm_dialog(self, job_count):
+        """Show dialog with file transfer options before sending to farm.
+        Returns True if user confirmed, False if cancelled."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Send to Farm")
+        dlg_layout = QVBoxLayout(dlg)
+        dlg_layout.addWidget(QLabel(f"Sending {job_count} job{'s' if job_count > 1 else ''} to the render farm."))
+        self._dlg_chk_send_files = QCheckBox("Send project files to farm")
+        self._dlg_chk_send_files.setToolTip(
+            "Upload the .moho project file to the master.\n"
+            "Use this when slave machines don't have the project file locally.")
+        self._dlg_chk_send_files.setChecked(self.chk_send_project_files.isChecked())
+        dlg_layout.addWidget(self._dlg_chk_send_files)
+        self._dlg_chk_send_siblings = QCheckBox("Include files from project folder")
+        self._dlg_chk_send_siblings.setToolTip(
+            "Also send all files in the same folder as the project (images, audio, etc.).")
+        self._dlg_chk_send_siblings.setChecked(self.chk_send_sibling_files.isChecked())
+        self._dlg_chk_send_siblings.setEnabled(self._dlg_chk_send_files.isChecked())
+        self._dlg_chk_send_files.toggled.connect(self._dlg_chk_send_siblings.setEnabled)
+        dlg_layout.addWidget(self._dlg_chk_send_siblings)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        dlg_layout.addWidget(buttons)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return False
+        # Sync checkboxes back to Farm tab settings
+        self.chk_send_project_files.setChecked(self._dlg_chk_send_files.isChecked())
+        self.chk_send_sibling_files.setChecked(self._dlg_chk_send_siblings.isChecked())
+        return True
+
     def _send_selected_to_farm(self):
         """Send selected pending jobs from local queue to the farm."""
         if not self.master_server and not self.slave_client:
@@ -3065,17 +3170,21 @@ class MainWindow(QMainWindow):
         if not selected_rows:
             QMessageBox.information(self, "No Selection", "Select pending jobs to send to the farm.")
             return
-        sent = 0
-        for row in reversed(selected_rows):
+        pending_jobs = []
+        for row in selected_rows:
             if row < len(self.queue.jobs):
                 job = self.queue.jobs[row]
                 if job.status == RenderStatus.PENDING.value:
-                    farm_job = RenderJob.from_dict(job.to_dict())
-                    self._submit_job_to_farm(farm_job)
-                    self.queue.remove_job(job.id)
-                    sent += 1
-        if sent:
-            self._append_farm_log(f"[GUI] Sent {sent} job{'s' if sent > 1 else ''} to farm queue")
+                    pending_jobs.append(job)
+        if not pending_jobs:
+            return
+        if not self._show_send_to_farm_dialog(len(pending_jobs)):
+            return
+        for job in reversed(pending_jobs):
+            farm_job = RenderJob.from_dict(job.to_dict())
+            self._submit_job_to_farm(farm_job)
+            self.queue.remove_job(job.id)
+        self._append_farm_log(f"[GUI] Sent {len(pending_jobs)} job{'s' if len(pending_jobs) > 1 else ''} to farm queue")
 
     def _send_all_to_farm(self):
         """Send all pending local queue jobs to the farm."""
@@ -3087,6 +3196,8 @@ class MainWindow(QMainWindow):
         if not pending:
             QMessageBox.information(self, "No Pending Jobs", "No pending jobs in the local queue.")
             return
+        if not self._show_send_to_farm_dialog(len(pending)):
+            return
         for job in list(pending):
             farm_job = RenderJob.from_dict(job.to_dict())
             self._submit_job_to_farm(farm_job)
@@ -3096,6 +3207,8 @@ class MainWindow(QMainWindow):
     def _send_jobs_to_farm(self, jobs):
         """Send specific jobs to the farm (from context menu)."""
         if not self.master_server and not self.slave_client:
+            return
+        if not self._show_send_to_farm_dialog(len(jobs)):
             return
         for job in list(jobs):
             farm_job = RenderJob.from_dict(job.to_dict())
@@ -3256,10 +3369,10 @@ class MainWindow(QMainWindow):
         job_id = id_item.text()
 
         menu = QMenu(self)
-        if status in ("PENDING", "RESERVED"):
+        if status in ("PENDING", "RESERVED", "COMPOSE"):
             act_assign = menu.addAction("Assign to Slave...")
             act_assign.triggered.connect(lambda: self._assign_farm_job_to_slave_dialog(job_id))
-            act_edit = menu.addAction("Edit Render Settings...")
+            act_edit = menu.addAction("Edit Settings...")
             act_edit.triggered.connect(lambda: self._edit_farm_job_settings(job_id))
             menu.addSeparator()
             act_cancel = menu.addAction("Cancel Job")
@@ -3452,6 +3565,11 @@ class MainWindow(QMainWindow):
                     job = j
                     break
         if not job:
+            return
+        # Compose-only jobs get a simpler dialog
+        if not job.project_file and job.compose_layers:
+            self._edit_compose_settings([job])
+            self._refresh_farm_queue_table()
             return
         dialog = EditSettingsDialog([job], parent=self)
         if dialog.exec():

@@ -28,6 +28,8 @@ Created by **Damián Turkieh**
 - **Windows Integration** - Right-click context menu on .moho files to render or add to queue
 - **Drag & Drop** - Drag .moho files directly onto the application window
 - **Edit Queue Settings** - Modify render settings for one or multiple queued jobs simultaneously
+- **Start Selected Jobs** - Start only specific jobs from the queue without starting the entire queue
+- **Send to Farm Dialog** - Confirmation dialog with file transfer options when sending jobs to the render farm
 - **Show in Explorer** - Open project location directly from the queue context menu
 
 ---
@@ -397,6 +399,12 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 ---
 
 ## Changelog
+
+### v1.6.0
+- **Start Job** - New button and context menu option to start only the selected job(s) without starting the entire queue
+- **Send to Farm from context menu** - Right-click pending jobs to send them to the farm (works on both master and slave)
+- **Send to Farm dialog** - Confirmation dialog with file transfer options shown when sending jobs to the farm
+- **Edit Compose Settings** - Compose-only jobs now show a compose-specific settings dialog instead of the full render settings
 
 ### v1.5.9
 - **Auto-Compose multi-format** - Now supports PNG, JPEG, TGA, and BMP image sequences (not just PNG)

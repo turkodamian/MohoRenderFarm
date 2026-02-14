@@ -113,6 +113,33 @@ class RenderQueue:
             self._workers.append(t)
             t.start()
 
+    def start_jobs(self, job_ids: list):
+        """Start only specific jobs by their IDs.
+
+        Sets the specified pending jobs to a 'queued' state so workers
+        only pick those up, then starts workers if not already running.
+        """
+        # Tag selected jobs so workers can identify them
+        found = 0
+        with self._lock:
+            for job in self.jobs:
+                if job.id in job_ids and job.status == RenderStatus.PENDING.value:
+                    job._start_selected = True
+                    found += 1
+        if found == 0:
+            return
+        if self._running:
+            # Workers already running — they'll pick up tagged jobs
+            return
+        self._running = True
+        self._paused = False
+        self._workers_done = 0
+        self._workers = []
+        for i in range(min(self._max_concurrent, found)):
+            t = threading.Thread(target=self._worker_func, args=(i, True), daemon=True)
+            self._workers.append(t)
+            t.start()
+
     def stop(self):
         """Stop processing and cancel all active renders."""
         self._running = False
@@ -179,7 +206,7 @@ class RenderQueue:
     def failed_count(self):
         return len([j for j in self.jobs if j.status == RenderStatus.FAILED.value])
 
-    def _worker_func(self, worker_id: int):
+    def _worker_func(self, worker_id: int, selected_only: bool = False):
         """Worker thread: grab pending jobs and render them."""
         while self._running:
             if self._paused:
@@ -191,9 +218,14 @@ class RenderQueue:
             with self._lock:
                 for job in self.jobs:
                     if job.status == RenderStatus.PENDING.value:
+                        if selected_only and not getattr(job, '_start_selected', False):
+                            continue
                         next_job = job
                         # Mark as rendering immediately to prevent other workers from grabbing it
                         next_job.status = RenderStatus.RENDERING.value
+                        # Clear the selection tag
+                        if hasattr(next_job, '_start_selected'):
+                            del next_job._start_selected
                         break
 
             if next_job is None:
