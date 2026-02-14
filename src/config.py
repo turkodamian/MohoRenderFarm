@@ -4,10 +4,12 @@ import os
 from pathlib import Path
 
 APP_NAME = "Moho Render Farm"
-APP_VERSION = "1.6.2"
+APP_VERSION = "1.6.3"
 APP_AUTHOR = "Damián Turkieh"
 
 DEFAULT_MOHO_PATH = r"C:\Program Files\Moho 14\Moho.exe"
+APP_DIR = Path(__file__).parent.parent
+DEFAULT_FARM_RENDERS_DIR = str(APP_DIR / "Renders")
 CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "MohoRenderFarm"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 QUEUE_DIR = CONFIG_DIR / "queues"
@@ -34,6 +36,7 @@ DEFAULT_CONFIG = {
     "farm_send_project_files": False,
     "farm_send_sibling_files": False,
     "auto_reconnect_slave": False,
+    "farm_renders_dir": "",
 }
 
 FORMATS = [

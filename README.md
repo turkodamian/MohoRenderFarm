@@ -401,6 +401,10 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 
 ## Changelog
 
+### v1.6.3
+- **Fix farm render output deleted** - Farm jobs with file transfer that used "project folder" output mode had their rendered files deleted during temp cleanup. Output is now redirected to a configurable "Farm Renders Folder" (default: `Renders/` next to the app)
+- **Farm Renders Folder setting** - New App Settings option to configure where farm-rendered files are saved on the slave machine
+
 ### v1.6.2
 - **Disabled Slave Status** - Render-disabled slaves now show "disabled" status (gray) in the master's connected slaves table
 - **Verbose Farm Logging** - Added detailed logging for job dispatch, file transfers, extraction, cleanup, worker registration, and error reporting across master and slave for better debugging

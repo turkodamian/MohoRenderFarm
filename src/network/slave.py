@@ -31,6 +31,7 @@ class SlaveClient:
         self.completed_jobs: List[RenderJob] = []
         self._force_update_triggered = False
         self.render_enabled = True  # Whether this slave accepts render jobs
+        self.farm_renders_dir = ""  # Where farm renders go (empty = default)
 
         # Callbacks
         self.on_connected: Optional[Callable[[], None]] = None
@@ -256,6 +257,18 @@ class SlaveClient:
                 if self.on_job_completed:
                     self.on_job_completed(job)
                 return
+
+        # Redirect output for farm jobs that would render into temp dir
+        if job.farm_files_uploaded and not job.output_path:
+            from src.config import DEFAULT_FARM_RENDERS_DIR
+            renders_dir = self.farm_renders_dir or DEFAULT_FARM_RENDERS_DIR
+            name = Path(job.project_file).stem
+            if job.subfolder_project:
+                job.output_path = os.path.join(renders_dir, name)
+            else:
+                job.output_path = renders_dir
+            if self.on_output:
+                self.on_output(f"Worker {worker_id}: Farm output redirected to {job.output_path}")
 
         renderer = MohoRenderer(self.moho_path)
         with self._lock:

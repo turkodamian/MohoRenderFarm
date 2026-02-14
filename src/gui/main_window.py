@@ -19,7 +19,7 @@ from src.config import (
     AppConfig, APP_NAME, APP_VERSION, APP_AUTHOR,
     FORMATS, WINDOWS_PRESETS, RESOLUTIONS, MOHO_FILE_EXTENSIONS,
     QUALITY_LEVELS, QUEUE_DIR, PRESETS_DIR, CONFIG_DIR,
-    DISCORD_WEBHOOK_URL, AUTOSAVE_QUEUE_FILE,
+    DISCORD_WEBHOOK_URL, AUTOSAVE_QUEUE_FILE, DEFAULT_FARM_RENDERS_DIR,
 )
 import json
 from src.moho_renderer import RenderJob, RenderStatus
@@ -1526,6 +1526,28 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(output_group)
 
+        # Farm renders folder
+        farm_render_group = QGroupBox("Farm Renders Folder")
+        farm_render_layout = QFormLayout(farm_render_group)
+
+        self.edit_farm_renders_dir = QLineEdit()
+        self.edit_farm_renders_dir.setText(self.config.get("farm_renders_dir", ""))
+        self.edit_farm_renders_dir.setPlaceholderText(DEFAULT_FARM_RENDERS_DIR)
+        self.edit_farm_renders_dir.setToolTip(
+            "Where farm-rendered files are saved on this machine when jobs use 'project folder' mode.\n"
+            "Leave empty for default (Renders subfolder next to the app).")
+        browse_farm_renders = QPushButton("Browse...")
+        browse_farm_renders.setFixedWidth(browse_farm_renders.sizeHint().width() + 10)
+        browse_farm_renders.clicked.connect(self._browse_farm_renders_dir)
+        farm_render_row = QHBoxLayout()
+        farm_render_row.addWidget(self.edit_farm_renders_dir)
+        farm_render_row.addWidget(browse_farm_renders)
+        farm_render_layout.addRow("Folder:", farm_render_row)
+        self.edit_farm_renders_dir.textChanged.connect(
+            lambda t: self.config.set("farm_renders_dir", t))
+
+        layout.addWidget(farm_render_group)
+
         # Context menu
         ctx_group = QGroupBox("Windows Integration")
         ctx_layout = QVBoxLayout(ctx_group)
@@ -2520,6 +2542,11 @@ class MainWindow(QMainWindow):
             self.config.moho_path = filepath
             self._append_log(f"Moho path set to: {filepath}")
 
+    def _browse_farm_renders_dir(self):
+        folder = QFileDialog.getExistingDirectory(self, "Select Farm Renders Folder")
+        if folder:
+            self.edit_farm_renders_dir.setText(folder)
+
     def _browse_default_output(self):
         folder = QFileDialog.getExistingDirectory(self, "Select Default Output Folder")
         if folder:
@@ -2931,6 +2958,7 @@ class MainWindow(QMainWindow):
         self.slave_client = SlaveClient(host, port, moho, slave_port=port + 1,
                                         max_concurrent=self.config.get("max_local_renders", 1))
         self.slave_client.render_enabled = self.chk_render_enabled.isChecked()
+        self.slave_client.farm_renders_dir = self.config.get("farm_renders_dir", "")
         self.slave_client.on_output = lambda msg: self.farm_log_signal.emit(f"[SLAVE] {msg}")
         self.slave_client.on_connected = lambda: self.farm_status_signal.emit(
             f"Slave connected to {host}:{port}", "#a6e3a1")
