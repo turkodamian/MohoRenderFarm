@@ -23,6 +23,7 @@ class SlaveInfo:
         self.last_heartbeat = time.time()
         self.jobs_completed = 0
         self.jobs_failed = 0
+        self.render_enabled = True  # Whether this slave accepts render jobs
 
     @property
     def address(self):
@@ -42,6 +43,7 @@ class SlaveInfo:
             "last_heartbeat": self.last_heartbeat,
             "jobs_completed": self.jobs_completed,
             "jobs_failed": self.jobs_failed,
+            "render_enabled": self.render_enabled,
         }
 
 
@@ -93,17 +95,22 @@ class MasterServer:
             port = data.get("port", 0)
             key = f"{ip}:{port}"
 
+            render_enabled = data.get("render_enabled", True)
+
             with self._lock:
                 if key not in self.slaves:
                     slave = SlaveInfo(hostname, ip, port)
+                    slave.render_enabled = render_enabled
                     self.slaves[key] = slave
                     if self.on_slave_connected:
                         self.on_slave_connected(slave)
                     if self.on_output:
-                        self.on_output(f"Slave connected: {hostname} ({key})")
+                        mode = "render+submit" if render_enabled else "submit-only"
+                        self.on_output(f"Slave connected: {hostname} ({key}) [{mode}]")
                 else:
                     self.slaves[key].last_heartbeat = time.time()
                     self.slaves[key].hostname = hostname
+                    self.slaves[key].render_enabled = render_enabled
                     if self.slaves[key].status == "offline":
                         self.slaves[key].status = "idle"
                         if self.on_slave_connected:
@@ -125,6 +132,10 @@ class MasterServer:
                 if key in self.slaves:
                     self.slaves[key].last_heartbeat = time.time()
                     self.slaves[key].status = data.get("status", "idle")
+                    # Update render_enabled from slave (only if not overridden by master)
+                    slave_render = data.get("render_enabled", True)
+                    if slave_render is False:
+                        self.slaves[key].render_enabled = False
                 if key in self.active_jobs and self._cancel_requests:
                     job = self.active_jobs[key]
                     if job.id in self._cancel_requests:
@@ -150,6 +161,10 @@ class MasterServer:
 
                 # Don't dispatch jobs when paused
                 if self._paused:
+                    return jsonify({"job": None})
+
+                # Don't dispatch jobs to slaves with rendering disabled
+                if not self.slaves[key].render_enabled:
                     return jsonify({"job": None})
 
                 # Check for a manually reserved job first
@@ -451,6 +466,12 @@ class MasterServer:
         self._paused = False
         if self.on_output:
             self.on_output("Farm queue resumed")
+
+    def set_slave_render_enabled(self, slave_address: str, enabled: bool):
+        """Enable or disable rendering for a specific slave."""
+        with self._lock:
+            if slave_address in self.slaves:
+                self.slaves[slave_address].render_enabled = enabled
 
     def force_update_slaves(self):
         """Set the force_update flag so all slaves update on next heartbeat."""

@@ -10,6 +10,7 @@ Created by **Damián Turkieh**
 
 - **Batch Rendering** - Queue multiple Moho projects with concurrent rendering support
 - **Render Farm** - Master/Slave network system for distributed rendering across multiple PCs, with project file transfer
+- **Submit-Only Slaves** - Slaves can be configured to only submit jobs without rendering, ideal for remote animators
 - **Concurrent Rendering** - Configurable max simultaneous renders (local queue and slave mode)
 - **Full GUI** - Dark-themed PyQt6 interface with drag-and-drop support
 - **CLI Automation** - Complete command-line interface for scripting and pipelines
@@ -399,6 +400,10 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 ---
 
 ## Changelog
+
+### v1.6.1
+- **Submit-Only Slaves** - Slaves can be configured to only submit jobs without rendering, controlled via "Accept render jobs from farm" checkbox on the slave side and "Enable/Disable Rendering" context menu on the master's slaves table
+- **Render Column in Slaves Table** - New column shows "Yes"/"No" render status per slave with color coding
 
 ### v1.6.0
 - **Start Job** - New button and context menu option to start only the selected job(s) without starting the entire queue

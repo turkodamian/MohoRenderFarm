@@ -30,6 +30,7 @@ class SlaveClient:
         self._active_renders: Dict[int, Tuple[MohoRenderer, RenderJob]] = {}
         self.completed_jobs: List[RenderJob] = []
         self._force_update_triggered = False
+        self.render_enabled = True  # Whether this slave accepts render jobs
 
         # Callbacks
         self.on_connected: Optional[Callable[[], None]] = None
@@ -82,7 +83,11 @@ class SlaveClient:
         try:
             resp = requests.post(
                 f"{self.master_url}/api/register",
-                json={"hostname": self.hostname, "port": self.slave_port},
+                json={
+                    "hostname": self.hostname,
+                    "port": self.slave_port,
+                    "render_enabled": self.render_enabled,
+                },
                 timeout=5,
             )
             if resp.status_code == 200:
@@ -112,6 +117,7 @@ class SlaveClient:
                         "port": self.slave_port,
                         "status": status,
                         "active_jobs": active_count,
+                        "render_enabled": self.render_enabled,
                     },
                     timeout=5,
                 )
@@ -182,6 +188,11 @@ class SlaveClient:
                 if not registered:
                     time.sleep(5)
                     continue
+
+            # Skip job requests when rendering is disabled (submit-only mode)
+            if not self.render_enabled:
+                time.sleep(3)
+                continue
 
             # Request a job
             try:

@@ -1315,6 +1315,18 @@ class MainWindow(QMainWindow):
             lambda v: self.config.set("farm_send_sibling_files", v))
         mode_layout.addLayout(file_row)
 
+        # Render enabled option
+        render_row = QHBoxLayout()
+        self.chk_render_enabled = QCheckBox("Accept render jobs from farm")
+        self.chk_render_enabled.setToolTip(
+            "When unchecked, this machine only submits jobs to the farm but does not render.\n"
+            "Use this for remote animators who send projects but shouldn't render locally.")
+        self.chk_render_enabled.setChecked(self.config.get("slave_render_enabled", True))
+        self.chk_render_enabled.toggled.connect(self._on_render_enabled_toggled)
+        render_row.addWidget(self.chk_render_enabled)
+        render_row.addStretch()
+        mode_layout.addLayout(render_row)
+
         layout.addWidget(mode_group)
 
         # Horizontal splitter: Slaves + Farm Queue
@@ -1326,9 +1338,9 @@ class MainWindow(QMainWindow):
         slaves_layout.setContentsMargins(0, 0, 0, 0)
         slaves_layout.addWidget(QLabel("Connected Slaves"))
         self.slaves_table = QTableWidget()
-        self.slaves_table.setColumnCount(6)
+        self.slaves_table.setColumnCount(7)
         self.slaves_table.setHorizontalHeaderLabels([
-            "Hostname", "IP:Port", "Status", "Current Job", "Completed", "Failed"
+            "Hostname", "IP:Port", "Status", "Current Job", "Completed", "Failed", "Render"
         ])
         sl_header = self.slaves_table.horizontalHeader()
         sl_header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
@@ -1339,6 +1351,7 @@ class MainWindow(QMainWindow):
         self.slaves_table.setColumnWidth(3, 200)
         self.slaves_table.setColumnWidth(4, 75)
         self.slaves_table.setColumnWidth(5, 60)
+        self.slaves_table.setColumnWidth(6, 60)
         self.slaves_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.slaves_table.setAlternatingRowColors(True)
         self.slaves_table.verticalHeader().setVisible(False)
@@ -2917,6 +2930,7 @@ class MainWindow(QMainWindow):
         moho = self.edit_moho_path.text()
         self.slave_client = SlaveClient(host, port, moho, slave_port=port + 1,
                                         max_concurrent=self.config.get("max_local_renders", 1))
+        self.slave_client.render_enabled = self.chk_render_enabled.isChecked()
         self.slave_client.on_output = lambda msg: self.farm_log_signal.emit(f"[SLAVE] {msg}")
         self.slave_client.on_connected = lambda: self.farm_status_signal.emit(
             f"Slave connected to {host}:{port}", "#a6e3a1")
@@ -2942,6 +2956,14 @@ class MainWindow(QMainWindow):
         self._append_farm_log(f"[SLAVE] Connecting to {host}:{port}...")
         self.config.set("network_master_host", host)
         self.config.set("network_port", port)
+
+    def _on_render_enabled_toggled(self, checked):
+        """Toggle render-enabled flag on the slave client."""
+        self.config.set("slave_render_enabled", checked)
+        if self.slave_client:
+            self.slave_client.render_enabled = checked
+            mode = "render+submit" if checked else "submit-only"
+            self._append_farm_log(f"[SLAVE] Render mode changed: {mode}")
 
     def _stop_slave(self):
         if hasattr(self, '_slave_queue_timer'):
@@ -2980,6 +3002,10 @@ class MainWindow(QMainWindow):
             self.slaves_table.setItem(row, 3, QTableWidgetItem(slave.current_job_id))
             self.slaves_table.setItem(row, 4, QTableWidgetItem(str(slave.jobs_completed)))
             self.slaves_table.setItem(row, 5, QTableWidgetItem(str(slave.jobs_failed)))
+            render_text = "Yes" if slave.render_enabled else "No"
+            render_item = QTableWidgetItem(render_text)
+            render_item.setForeground(QColor("#a6e3a1" if slave.render_enabled else "#f38ba8"))
+            self.slaves_table.setItem(row, 6, render_item)
 
     def _refresh_farm_queue_table(self):
         """Refresh the Farm Queue table with all farm jobs."""
@@ -3323,13 +3349,33 @@ class MainWindow(QMainWindow):
             return
         slave_address = key_item.text()
         slave_status = status_item.text()
+        slave = self.master_server.slaves.get(slave_address)
 
         menu = QMenu(self)
         if slave_status == "idle":
             act_assign = menu.addAction("Assign Job...")
             act_assign.triggered.connect(lambda: self._assign_job_to_slave_dialog(slave_address))
+
+        # Enable/Disable rendering toggle
+        if slave:
+            if slave.render_enabled:
+                act_render = menu.addAction("Disable Rendering")
+                act_render.triggered.connect(lambda: self._toggle_slave_render(slave_address, False))
+            else:
+                act_render = menu.addAction("Enable Rendering")
+                act_render.triggered.connect(lambda: self._toggle_slave_render(slave_address, True))
+
         if not menu.isEmpty():
             menu.exec(self.slaves_table.viewport().mapToGlobal(pos))
+
+    def _toggle_slave_render(self, slave_address, enabled):
+        """Enable or disable rendering for a slave from the master side."""
+        self.master_server.set_slave_render_enabled(slave_address, enabled)
+        self._refresh_slaves()
+        state = "enabled" if enabled else "disabled"
+        hostname = self.master_server.slaves.get(slave_address, None)
+        name = hostname.hostname if hostname else slave_address
+        self._append_farm_log(f"[MASTER] Rendering {state} for {name} ({slave_address})")
 
     def _assign_job_to_slave_dialog(self, slave_address):
         """Show dialog to pick a pending farm job to assign to a specific slave."""
