@@ -60,6 +60,9 @@ class SlaveClient:
         if self._running:
             return
         self._running = True
+        mode = "render+submit" if self.render_enabled else "submit-only"
+        if self.on_output:
+            self.on_output(f"Starting slave ({mode} mode, {self._max_concurrent} workers)")
         self._workers = []
         for i in range(self._max_concurrent):
             t = threading.Thread(target=self._worker_loop, args=(i,), daemon=True)
@@ -70,6 +73,10 @@ class SlaveClient:
 
     def stop(self):
         """Stop the slave client and cancel all active renders."""
+        if self.on_output:
+            with self._lock:
+                active = len(self._active_renders)
+            self.on_output(f"Stopping slave ({active} active render{'s' if active != 1 else ''})")
         self._running = False
         with self._lock:
             for renderer, _ in self._active_renders.values():
@@ -94,7 +101,8 @@ class SlaveClient:
                 if self.on_connected:
                     self.on_connected()
                 if self.on_output:
-                    self.on_output(f"Connected to master at {self.master_host}:{self.master_port}")
+                    mode = "render+submit" if self.render_enabled else "submit-only"
+                    self.on_output(f"Registered with master at {self.master_host}:{self.master_port} [{mode}]")
                 return True
         except requests.ConnectionError:
             if self.on_output:
@@ -206,13 +214,20 @@ class SlaveClient:
                     job_data = data.get("job")
                     if job_data:
                         job = RenderJob.from_dict(job_data)
+                        if self.on_output:
+                            files_flag = " [with files]" if job.farm_files_uploaded else ""
+                            self.on_output(f"Worker {worker_id}: Received job from master: {job.project_name} [{job.id}]{files_flag}")
                         self._process_job(worker_id, job)
                     else:
                         time.sleep(3)
                 elif resp.status_code == 403:
+                    if self.on_output:
+                        self.on_output(f"Worker {worker_id}: Not registered, re-registering...")
                     registered = False
                     time.sleep(2)
                 else:
+                    if self.on_output:
+                        self.on_output(f"Worker {worker_id}: Unexpected response from master: HTTP {resp.status_code}")
                     time.sleep(5)
             except requests.ConnectionError:
                 registered = False
@@ -298,6 +313,14 @@ class SlaveClient:
         """Report job completion to master."""
         success = job.status == RenderStatus.COMPLETED.value
         cancelled = job.status == RenderStatus.CANCELLED.value
+        if self.on_output:
+            if success:
+                elapsed = job.elapsed_str if hasattr(job, 'elapsed_str') else "?"
+                self.on_output(f"Job completed: {job.project_name} ({elapsed}) - reporting to master")
+            elif cancelled:
+                self.on_output(f"Job cancelled: {job.project_name} - reporting to master")
+            else:
+                self.on_output(f"Job failed: {job.project_name} ({job.error_message}) - reporting to master")
         try:
             requests.post(
                 f"{self.master_url}/api/job_complete",
@@ -338,19 +361,27 @@ class SlaveClient:
                     f.write(chunk)
 
             size_mb = zip_path.stat().st_size / (1024 * 1024)
+            if self.on_output:
+                self.on_output(f"Worker {worker_id}: Downloaded {size_mb:.1f} MB, extracting...")
 
             with zipfile.ZipFile(str(zip_path), "r") as zf:
+                file_count = len(zf.namelist())
                 zf.extractall(str(work_dir))
             zip_path.unlink()
+
+            if self.on_output:
+                self.on_output(f"Worker {worker_id}: Extracted {file_count} files to {work_dir}")
 
             # Rewrite job project path to extracted location
             original_name = job.farm_original_project or Path(job.project_file).name
             new_project = work_dir / original_name
             if new_project.exists():
                 job.project_file = str(new_project)
-
-            if self.on_output:
-                self.on_output(f"Worker {worker_id}: Files ready ({size_mb:.1f} MB) in {work_dir}")
+                if self.on_output:
+                    self.on_output(f"Worker {worker_id}: Project file: {new_project}")
+            else:
+                if self.on_output:
+                    self.on_output(f"Worker {worker_id}: WARNING: Expected project file not found: {new_project}")
 
             return work_dir
         except Exception as e:
@@ -361,17 +392,23 @@ class SlaveClient:
 
     def _cleanup_work_dir(self, work_dir, job: RenderJob):
         """Clean up temp directory and request master cleanup."""
+        if self.on_output:
+            self.on_output(f"Cleaning up temp files: {work_dir}")
         try:
             shutil.rmtree(str(work_dir), ignore_errors=True)
-        except Exception:
-            pass
+        except Exception as e:
+            if self.on_output:
+                self.on_output(f"Warning: Failed to cleanup temp dir: {e}")
         try:
             requests.delete(
                 f"{self.master_url}/api/cleanup_files/{job.id}",
                 timeout=10,
             )
-        except Exception:
-            pass
+            if self.on_output:
+                self.on_output(f"Requested master cleanup for job {job.id}")
+        except Exception as e:
+            if self.on_output:
+                self.on_output(f"Warning: Failed to request master cleanup: {e}")
 
     def submit_job(self, job: RenderJob, bundle_path: str = "") -> bool:
         """Submit a job to the master for rendering by the farm.
@@ -404,6 +441,8 @@ class SlaveClient:
             finally:
                 try:
                     os.unlink(bundle_path)
+                    if self.on_output:
+                        self.on_output(f"Cleaned up local bundle: {bundle_path}")
                 except OSError:
                     pass
 

@@ -401,6 +401,10 @@ Render logs are auto-saved to `%APPDATA%\MohoRenderFarm\logs\`.
 
 ## Changelog
 
+### v1.6.2
+- **Disabled Slave Status** - Render-disabled slaves now show "disabled" status (gray) in the master's connected slaves table
+- **Verbose Farm Logging** - Added detailed logging for job dispatch, file transfers, extraction, cleanup, worker registration, and error reporting across master and slave for better debugging
+
 ### v1.6.1
 - **Submit-Only Slaves** - Slaves can be configured to only submit jobs without rendering, controlled via "Accept render jobs from farm" checkbox on the slave side and "Enable/Disable Rendering" context menu on the master's slaves table
 - **Render Column in Slaves Table** - New column shows "Yes"/"No" render status per slave with color coding

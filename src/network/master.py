@@ -169,6 +169,7 @@ class MasterServer:
 
                 # Check for a manually reserved job first
                 job = self.reserved_jobs.pop(key, None)
+                was_reserved = job is not None
 
                 # Fall back to FIFO from pending queue
                 if job is None and self.pending_jobs:
@@ -185,7 +186,9 @@ class MasterServer:
                     if self.on_job_assigned:
                         self.on_job_assigned(job, self.slaves[key])
                     if self.on_output:
-                        self.on_output(f"Job assigned: {job.project_name} [{job.id}] -> {self.slaves[key].hostname}")
+                        source = "reserved" if was_reserved else "queue"
+                        files = " [with files]" if job.farm_files_uploaded else ""
+                        self.on_output(f"Job dispatched ({source}): {job.project_name} [{job.id}] -> {self.slaves[key].hostname}{files}")
 
                     self._notify_queue_changed()
                     return jsonify({"job": job.to_dict()})
@@ -240,6 +243,8 @@ class MasterServer:
                     # Clean up uploaded files if any
                     if job.farm_files_uploaded:
                         self._cleanup_job_files(job.id)
+                        if self.on_output:
+                            self.on_output(f"Cleaned up uploaded files for job {job_id}")
 
                 if key in self.slaves:
                     self.slaves[key].status = "idle"
@@ -296,7 +301,13 @@ class MasterServer:
         def download_files(job_id):
             path = FARM_FILES_DIR / f"{job_id}.zip"
             if not path.exists():
+                if self.on_output:
+                    self.on_output(f"File download requested but not found: {job_id}")
                 return jsonify({"error": "not found"}), 404
+            if self.on_output:
+                size_mb = path.stat().st_size / (1024 * 1024)
+                slave_ip = request.remote_addr
+                self.on_output(f"Sending files to slave {slave_ip}: {job_id} ({size_mb:.1f} MB)")
             return send_file(str(path), mimetype="application/zip",
                              as_attachment=True, download_name=f"{job_id}.zip")
 
@@ -472,6 +483,10 @@ class MasterServer:
         with self._lock:
             if slave_address in self.slaves:
                 self.slaves[slave_address].render_enabled = enabled
+                if self.on_output:
+                    name = self.slaves[slave_address].hostname
+                    state = "enabled" if enabled else "disabled"
+                    self.on_output(f"Rendering {state} for slave {name} ({slave_address})")
 
     def force_update_slaves(self):
         """Set the force_update flag so all slaves update on next heartbeat."""

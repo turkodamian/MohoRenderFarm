@@ -2990,11 +2990,17 @@ class MainWindow(QMainWindow):
             "idle": "#a6e3a1",      # green
             "rendering": "#89b4fa",  # blue
             "offline": "#f38ba8",    # red
+            "disabled": "#9399b2",   # gray
         }
         for row, (key, slave) in enumerate(slaves.items()):
             self.slaves_table.setItem(row, 0, QTableWidgetItem(slave.hostname))
             self.slaves_table.setItem(row, 1, QTableWidgetItem(key))
-            actual_status = slave.status if slave.is_alive else "offline"
+            if not slave.is_alive:
+                actual_status = "offline"
+            elif not slave.render_enabled and slave.status != "rendering":
+                actual_status = "disabled"
+            else:
+                actual_status = slave.status
             status_item = QTableWidgetItem(actual_status)
             color = status_colors.get(actual_status, "#cdd6f4")
             status_item.setForeground(QColor(color))
